@@ -222,7 +222,7 @@ def test_chat_http_contract_ready_selection_validation_and_no_external_calls(sav
         response = client.post(f"/api/runs/{saved_result.run_id}/chat", json={"message": "Why this investor?"})
         assert response.status_code == 200
         body = response.json()
-        assert set(body) == {"message", "citations", "candidate_ids", "model_used"}
+        assert set(body) == {"message", "citations", "candidate_ids", "model_used", "tool_steps", "citation_ids"}
         assert body["model_used"] is False and body["citations"]
         invalid = client.post(f"/api/runs/{saved_result.run_id}/chat", json={
             "message": "Why?", "selected_investor_id": "not-in-this-run"})

@@ -2,6 +2,12 @@ import { expect, test, type Page } from "@playwright/test";
 import type { RunChatRequest } from "../lib/chat-api";
 import type { CandidateCard, Entity, FounderInput, FundingRound, RunResult, Source, StartRunRequest } from "../lib/types";
 
+/** SSE body: one `step` frame per tool step, then the `answer` (or an `error`). */
+function sse(answer: unknown, steps: unknown[] = [], error?: unknown): string {
+  return steps.map(step => `event: step\ndata: ${JSON.stringify(step)}\n\n`).join("")
+    + (error ? `event: error\ndata: ${JSON.stringify(error)}\n\n` : `event: answer\ndata: ${JSON.stringify(answer)}\n\n`);
+}
+
 const source: Source = { url: "https://synthetic.example.test/shared-round", label: "Synthetic round evidence",
   published_at: "2026-10-01", retrieved_at: "2026-11-14T00:00:00Z" };
 const entity = (id: string, name: string): Entity => ({ id, name, kind: "vc", country: "Finland",
@@ -74,11 +80,11 @@ async function mockApi(page: Page, prefillOverrides: Partial<{ website: string; 
   await page.route("**/api/runs/basic-run/events", route => route.fulfill({ contentType: "text/event-stream", body:
     `id: 1\nevent: tool_result\ndata: ${JSON.stringify({ id: 1, type: "tool_result", at: source.retrieved_at, step: "profiles", message: "Using cached Cala response", tool: "entity_retrieval", query: { entity_id: "synthetic-lead" }, cached: true, count: 1 })}\n\n`
     + `id: 2\nevent: complete\ndata: ${JSON.stringify({ id: 2, type: "complete", at: source.retrieved_at, step: "complete", message: "Synthetic run complete" })}\n\n` }));
-  await page.route("**/api/runs/basic-run/chat", route => {
+  await page.route("**/api/runs/basic-run/chat/stream", route => {
     const request = route.request().postDataJSON() as RunChatRequest;
     chatRequests.push(request);
-    return route.fulfill({ json: { message: `Live fixture answer about ${request.selected_investor_id || "the round"}.`,
-      citations: [source], candidate_ids: request.selected_investor_id ? [request.selected_investor_id] : ["first"], model_used: true } });
+    return route.fulfill({ contentType: "text/event-stream", body: sse({ message: `Live fixture answer about ${request.selected_investor_id || "the round"}.`,
+      citations: [source], candidate_ids: request.selected_investor_id ? [request.selected_investor_id] : ["first"], model_used: true, tool_steps: [] }) });
   });
   return { matching: () => matchingRequest!, confirmation: () => confirmationRequest!, run: () => runRequest, chat: () => chatRequests };
 }
@@ -285,14 +291,14 @@ test("negative round amounts are rejected before starting investor discovery", a
 test("live chat preserves history and draft across tabs and retries model failures without duplicate turns", async ({ page }) => {
   await mockApi(page);
   const requests: RunChatRequest[] = [];
-  await page.route("**/api/runs/basic-run/chat", async route => {
+  await page.route("**/api/runs/basic-run/chat/stream", async route => {
     const request = route.request().postDataJSON() as RunChatRequest;
     requests.push(request);
     if (requests.length === 2) {
       return route.fulfill({ status: 503, json: { error: { code: "chat_provider_unavailable", message: "The model is temporarily unavailable. Retry your question." } } });
     }
-    return route.fulfill({ json: { message: requests.length === 1 ? "First live model answer." : "Follow-up live model answer.",
-      citations: [source], candidate_ids: ["first"], model_used: true } });
+    return route.fulfill({ contentType: "text/event-stream", body: sse({ message: requests.length === 1 ? "First live model answer." : "Follow-up live model answer.",
+      citations: [source], candidate_ids: ["first"], model_used: true, tool_steps: [] }) });
   });
   await page.goto("/");
   await confirmCompanies(page);
@@ -324,4 +330,101 @@ test("live chat preserves history and draft across tabs and retries model failur
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(input).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+});
+
+test("agent chat shows the Cala lookups it ran and surfaces streamed errors", async ({ page }) => {
+  await mockApi(page);
+  const step = (id: string, status: string, label: string, count: number | null, error: string | null = null) =>
+    ({ id, tool: "search_entities", label, arguments: {}, status, count, error });
+  const steps = [step("t1", "started", "Searching Cala for investors named \u201cAcme\u201d", null),
+    step("t1", "done", "Searching Cala for investors named \u201cAcme\u201d", 3),
+    step("t2", "started", "Reading investor profile of Acme Capital", null),
+    step("t2", "failed", "Reading investor profile of Acme Capital", null, "Cala lookup budget for this chat is used up")];
+  let calls = 0;
+  await page.route("**/api/runs/basic-run/chat/stream", route => {
+    calls += 1;
+    if (calls === 2) {
+      return route.fulfill({ contentType: "text/event-stream", body: sse(null, steps.slice(0, 2),
+        { code: "chat_timeout", message: "The assistant took too long to answer. Please retry.", status: 504 }) });
+    }
+    return route.fulfill({ contentType: "text/event-stream", body: sse({ message: "Acme Capital co-invested with your lead (live Cala lookup).",
+      citations: [source], candidate_ids: ["first"], model_used: true, tool_steps: [steps[1], steps[3]] }, steps) });
+  });
+  await page.goto("/");
+  await confirmCompanies(page);
+  await completeRound(page);
+  await page.getByLabel("I have reviewed my round details.", { exact: true }).check();
+  await page.getByRole("button", { name: "Find my co-investors", exact: true }).click();
+  const input = page.getByLabel("Ask about your investors", { exact: true });
+  await input.fill("Who else co-invests with my lead?");
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  const answer = page.locator(".rc-chat-message-assistant").last();
+  await expect(answer).toContainText("Acme Capital co-invested");
+  await expect(answer.locator(".rc-chat-answer-meta")).toContainText("Live model + Cala lookups");
+  const lookups = answer.locator(".rc-chat-lookups");
+  await expect(lookups).toContainText("2 Cala lookups during this answer");
+  await lookups.locator("summary").click();
+  await expect(lookups.locator(".rc-chat-step-done")).toContainText("3 results");
+  await expect(lookups.locator(".rc-chat-step-failed")).toContainText("budget");
+  await input.fill("And who led their last round?");
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(page.locator(".rc-chat-error")).toContainText("took too long");
+  await expect(input).toHaveValue("And who led their last round?");
+});
+
+test("chat falls back to the single-response endpoint when the backend has no streaming route", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/runs/basic-run/chat/stream", route =>
+    route.fulfill({ status: 404, json: { error: { code: "http_error", message: "Not Found", details: null } } }));
+  await page.route("**/api/runs/basic-run/chat", route => route.fulfill({ json: {
+    message: "Answer from the older chat endpoint.", citations: [source], candidate_ids: [], model_used: true } }));
+  await page.goto("/");
+  await confirmCompanies(page);
+  await completeRound(page);
+  await page.getByLabel("I have reviewed my round details.", { exact: true }).check();
+  await page.getByRole("button", { name: "Find my co-investors", exact: true }).click();
+  await page.getByLabel("Ask about your investors", { exact: true }).fill("How do I reach or contact K Fund?");
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(page.locator(".rc-chat-message-assistant").last()).toContainText("Answer from the older chat endpoint.");
+  await expect(page.locator(".rc-chat-message-failed")).toHaveCount(0);
+});
+
+test("assistant answers render markdown with numbered inline citations", async ({ page }) => {
+  await mockApi(page);
+  const markdown = "**Short answer: use your existing relationship.**\n\n**Contact details**\n- Website: https://kfund.vc/\n"
+    + "- Registered address: Madrid ([s1]).\n\n1. Message your contact\n2. Reference the pre-seed\n\n> Subject: Cala AI seed\n>\n> Hi [name],";
+  await page.route("**/api/runs/basic-run/chat/stream", route => route.fulfill({ contentType: "text/event-stream", body: sse({
+    message: markdown, citations: [source], citation_ids: ["s1"], candidate_ids: [], model_used: true, tool_steps: [] }) }));
+  await page.goto("/");
+  await confirmCompanies(page);
+  await completeRound(page);
+  await page.getByLabel("I have reviewed my round details.", { exact: true }).check();
+  await page.getByRole("button", { name: "Find my co-investors", exact: true }).click();
+  await page.getByLabel("Ask about your investors", { exact: true }).fill("How do I contact Kfund?");
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  const answer = page.locator(".rc-chat-message-assistant").last().locator(".rc-chat-markdown");
+  await expect(answer.locator("strong").first()).toHaveText("Short answer: use your existing relationship.");
+  await expect(answer.locator("ul > li")).toHaveCount(2);
+  await expect(answer.locator("ol > li")).toHaveCount(2);
+  await expect(answer.locator("blockquote")).toContainText("Hi [name],");
+  await expect(answer.locator("a[href='https://kfund.vc/']")).toHaveAttribute("target", "_blank");
+  await expect(answer.locator(".rc-cite a")).toHaveText("1");
+  await expect(answer.locator(".rc-cite a")).toHaveAttribute("href", source.url);
+  await expect(answer).not.toContainText("**");
+  await expect(answer).not.toContainText("[s1]");
+});
+
+test("single newlines in an answer render as line breaks", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/runs/basic-run/chat/stream", route => route.fulfill({ contentType: "text/event-stream", body: sse({
+    message: "**Public contact channel**\nWebsite: https://kfund.vc/\nSubject: Cala AI seed", citations: [], citation_ids: [],
+    candidate_ids: [], model_used: true, tool_steps: [] }) }));
+  await page.goto("/");
+  await confirmCompanies(page);
+  await completeRound(page);
+  await page.getByLabel("I have reviewed my round details.", { exact: true }).check();
+  await page.getByRole("button", { name: "Find my co-investors", exact: true }).click();
+  await page.getByLabel("Ask about your investors", { exact: true }).fill("How do I contact Kfund?");
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(page.locator(".rc-chat-message-assistant").last().locator(".rc-chat-markdown br")).toHaveCount(2);
 });

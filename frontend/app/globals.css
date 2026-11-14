@@ -428,6 +428,32 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .rc-chat-role { display: flex; gap: 5px; align-items: center; color: #8b7b99; font-size: 10px; font-weight: 550; margin-bottom: 6px; }
 .rc-chat-bubble { background: #f7f5fa; border: 1px solid #efebf3; padding: 12px 13px; border-radius: 3px 12px 12px; }
 .rc-chat-bubble > p { font-size: 12px; line-height: 1.8; color: #4d4656; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rc-chat-markdown { font-size: 12px; line-height: 1.7; color: #4d4656; overflow-wrap: anywhere; }
+.rc-chat-markdown > :first-child { margin-top: 0; }
+.rc-chat-markdown > :last-child { margin-bottom: 0; }
+.rc-chat-markdown p { margin: 0 0 8px; font-size: 12px; line-height: 1.7; color: inherit; }
+.rc-chat-markdown strong { font-weight: 650; color: #3b3344; }
+.rc-chat-markdown h1, .rc-chat-markdown h2, .rc-chat-markdown h3, .rc-chat-markdown h4 { margin: 12px 0 6px; font-size: 12.5px; font-weight: 650; color: #3b3344; line-height: 1.4; }
+.rc-chat-markdown ul, .rc-chat-markdown ol { margin: 4px 0 10px; padding-left: 18px; }
+.rc-chat-markdown li { margin: 5px 0; padding-left: 2px; }
+.rc-chat-markdown ol > li + li, .rc-chat-markdown ul > li + li { margin-top: 6px; }
+.rc-chat-markdown li > p { margin: 0; }
+.rc-chat-markdown li::marker { color: #9a8aa8; }
+.rc-chat-markdown a { color: #5b4770; text-decoration: underline; text-decoration-color: #d7cae2; text-underline-offset: 2px; }
+.rc-chat-markdown blockquote { margin: 8px 0 10px; padding: 8px 11px; border-left: 3px solid #d9cfe3; background: white; border-radius: 0 6px 6px 0; color: #574e61; }
+.rc-chat-markdown blockquote p { margin: 0 0 6px; }
+.rc-chat-markdown code { font-size: 11px; background: #efeaf4; padding: 1px 4px; border-radius: 4px; }
+.rc-chat-markdown pre { background: #efeaf4; padding: 8px 10px; border-radius: 6px; overflow-x: auto; }
+.rc-chat-markdown pre code { background: none; padding: 0; }
+.rc-chat-markdown hr { border: 0; border-top: 1px solid #e8e1ef; margin: 10px 0; }
+.rc-md-table { overflow-x: auto; margin: 6px 0 10px; }
+.rc-md-table table { border-collapse: collapse; font-size: 11px; width: 100%; }
+.rc-md-table th, .rc-md-table td { border: 1px solid #e8e1ef; padding: 4px 6px; text-align: left; vertical-align: top; }
+.rc-md-table th { background: #f3eff8; font-weight: 600; }
+.rc-cite { font-size: 9px; line-height: 0; margin-left: 1px; }
+.rc-cite a { display: inline-block; min-width: 13px; padding: 0 3px; border-radius: 4px; background: #ebe4f2; color: #5b4770; text-decoration: none; text-align: center; font-weight: 600; }
+.rc-cite a:hover { background: #ddd1ea; }
+.rc-cite + .rc-cite { margin-left: 2px; }
 .rc-chat-message-user { margin-left: 24px; }
 .rc-chat-message-user .rc-chat-role { justify-content: flex-end; color: var(--muted); }
 .rc-chat-message-user .rc-chat-bubble { background: white; border-color: #e7e2ec; border-radius: 12px 3px 12px 12px; }
@@ -446,7 +472,16 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .rc-chat-copy-wrap { display: flex; gap: 4px; flex-direction: column; }
 .rc-chat-copy-wrap > span { font-size: 10px; }
 .rc-chat-copy { display: flex; align-items: center; gap: 4px; border: 0; background: none; color: #756381; font-size: 10px; padding: 2px; }
-.rc-chat-thinking { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; padding: 8px 0; }
+.rc-chat-thinking { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; padding: 8px 0; }
+.rc-chat-thinking-line { display: flex; align-items: center; gap: 7px; }
+.rc-chat-steps { list-style: none; margin: 0; padding: 0 0 0 4px; display: flex; flex-direction: column; gap: 4px; }
+.rc-chat-lookups .rc-chat-steps { margin-top: 8px; }
+.rc-chat-step { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: #5b4770; overflow-wrap: anywhere; }
+.rc-chat-step svg { flex-shrink: 0; align-self: center; }
+.rc-chat-step small { color: var(--muted); font-size: 10px; }
+.rc-chat-step-done svg { color: #4f8a6b; }
+.rc-chat-step-failed { color: #9a5b5b; }
+.rc-chat-step-started { color: var(--muted); }
 .rc-chat-error { padding: 10px; border: 1px solid #e0d6e8; border-radius: 8px; background: #fbf8fd; }
 .rc-chat-error p { font-size: 12px; }
 .rc-chat-error button { margin-top: 7px; display: flex; align-items: center; gap: 5px; background: white; border: 1px solid #e2d9e9; border-radius: 5px; padding: 5px 8px; font-size: 11px; }

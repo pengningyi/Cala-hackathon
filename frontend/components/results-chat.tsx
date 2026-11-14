@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUpRight, Check, ChevronDown, Copy, ExternalLink, Link2, LoaderCircle, MessageCircle, RotateCcw, Send, Sparkles, X } from "lucide-react";
-import { askRunChat, type ChatHistoryMessage } from "../lib/chat-api";
+import { AlertCircle, ArrowUpRight, Check, ChevronDown, Copy, Database, ExternalLink, Link2, LoaderCircle, MessageCircle, RotateCcw, Send, Sparkles, X } from "lucide-react";
+import { streamRunChat, type ChatHistoryMessage, type ChatToolStep } from "../lib/chat-api";
+import ChatMarkdown from "./chat-markdown";
 import type { RunResult, Source } from "../lib/types";
 
 interface ResultsChatProps {
@@ -18,7 +19,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   citations: Source[];
+  citationIds?: string[];
   candidateIds: string[];
+  toolSteps?: ChatToolStep[];
   origin?: "welcome" | "model" | "evidence";
   failed?: boolean;
 }
@@ -28,7 +31,7 @@ interface FailedQuestion {
   investorId: string | null;
 }
 
-const SUGGESTIONS = ["Why these investors?", "Compare the top two", "Draft an introduction request"];
+const SUGGESTIONS = ["Why these investors?", "Compare the top two", "Who else co-invests with my lead?", "Draft an introduction request"];
 
 function welcome(result: RunResult): Message {
   const count = result.candidates.length;
@@ -65,6 +68,27 @@ function Citations({ sources }: { sources: Source[] }) {
   </details>;
 }
 
+function stepDetail(step: ChatToolStep): string {
+  if (step.status === "failed") return step.error || "Lookup failed";
+  if (step.status === "started") return "";
+  return step.count === null ? "Done" : `${step.count} ${step.count === 1 ? "result" : "results"}`;
+}
+
+function ToolStepList({ steps }: { steps: ChatToolStep[] }) {
+  return <ol className="rc-chat-steps">{steps.map(step => <li key={step.id} className={`rc-chat-step rc-chat-step-${step.status}`}>
+    {step.status === "started" ? <LoaderCircle size={12} className="spinning" /> : step.status === "done" ? <Check size={12} /> : <AlertCircle size={12} />}
+    <span>{step.label}</span>{stepDetail(step) && <small>{stepDetail(step)}</small>}
+  </li>)}</ol>;
+}
+
+function ToolSteps({ steps }: { steps: ChatToolStep[] }) {
+  if (!steps.length) return null;
+  return <details className="rc-chat-citations rc-chat-lookups">
+    <summary><Database size={12} /><span>{steps.length} Cala {steps.length === 1 ? "lookup" : "lookups"} during this answer</span><ChevronDown size={12} /></summary>
+    <ToolStepList steps={steps} />
+  </details>;
+}
+
 function CopyReply({ content }: { content: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +113,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedQuestion, setFailedQuestion] = useState<FailedQuestion | null>(null);
+  const [liveSteps, setLiveSteps] = useState<ChatToolStep[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const requestVersion = useRef(0);
@@ -106,7 +131,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
       requestVersion.current += 1;
       previousRun.current = result.run_id;
       setMessages([welcome(result)]);
-      setInput(""); setBusy(false); setError(null); setFailedQuestion(null);
+      setInput(""); setBusy(false); setError(null); setFailedQuestion(null); setLiveSteps([]);
       nextMessage.current = 1;
     }
   }, [result]);
@@ -115,7 +140,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
     if (!active) return;
     const thread = threadRef.current;
     if (thread) thread.scrollTop = thread.scrollHeight;
-  }, [messages, busy, error, active]);
+  }, [messages, busy, error, active, liveSteps]);
 
   async function send(text: string, investorOverride?: string | null) {
     const question = text.trim();
@@ -129,13 +154,20 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
     controllerRef.current = controller;
     const version = ++requestVersion.current;
     setMessages([...base, { id: userId, role: "user", content: question, citations: [], candidateIds: [] }]);
-    setInput(""); setBusy(true); setError(null); setFailedQuestion(null);
+    setInput(""); setBusy(true); setError(null); setFailedQuestion(null); setLiveSteps([]);
+    const onStep = (step: ChatToolStep) => {
+      if (controller.signal.aborted || version !== requestVersion.current) return;
+      setLiveSteps(previous => previous.some(item => item.id === step.id)
+        ? previous.map(item => item.id === step.id ? step : item) : [...previous, step]);
+    };
     try {
-      const reply = await askRunChat(result.run_id, { message: question, history, selected_investor_id: investorId }, controller.signal);
+      const reply = await streamRunChat(result.run_id, { message: question, history, selected_investor_id: investorId }, onStep, controller.signal);
       if (controller.signal.aborted || version !== requestVersion.current) return;
       setMessages(previous => [...previous, {
         id: `answer-${nextMessage.current++}`, role: "assistant", content: reply.message,
         citations: reply.citations,
+        citationIds: reply.citation_ids,
+        toolSteps: reply.tool_steps,
         candidateIds: reply.candidate_ids.filter(id => result.candidates.some(card => card.investor.id === id)),
         origin: reply.model_used ? "model" : "evidence",
       }]);
@@ -146,7 +178,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
       setFailedQuestion({ message: question, investorId });
       setError(failure instanceof Error ? failure.message : "The assistant could not finish. Please try again.");
     } finally {
-      if (version === requestVersion.current) { setBusy(false); controllerRef.current = null; }
+      if (version === requestVersion.current) { setBusy(false); setLiveSteps([]); controllerRef.current = null; }
     }
   }
 
@@ -169,17 +201,23 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
     <div className="rc-chat-thread" ref={threadRef} role="log" aria-label="Conversation about your shortlist" aria-live="polite" aria-relevant="additions text" aria-busy={busy}>
       {messages.map(message => <div className={`rc-chat-message rc-chat-message-${message.role}${message.failed ? " rc-chat-message-failed" : ""}`} key={message.id}>
         <span className="rc-chat-role">{message.role === "user" ? "You" : <><Sparkles size={11} />RoundMe</>}</span>
-        <div className="rc-chat-bubble"><p>{message.content}</p>
+        <div className="rc-chat-bubble">{message.role === "assistant" && message.origin !== "welcome"
+          ? <ChatMarkdown content={message.content} citations={message.citations} citationIds={message.citationIds ?? []} />
+          : <p>{message.content}</p>}
           {message.failed && <span className="rc-chat-not-sent">No answer received. Your question is ready to retry.</span>}
           {message.candidateIds.length > 0 && <div className="rc-chat-investors" aria-label="Investors referenced in this answer">{message.candidateIds.map(id => {
             const card = result.candidates.find(candidate => candidate.investor.id === id)!;
             return <button type="button" key={id} aria-pressed={id === selectedInvestorId} onClick={() => onSelectInvestor(id)} title={`Highlight ${card.investor.name} in the knowledge graph`}>{card.investor.name}<ArrowUpRight size={12} /></button>;
           })}</div>}
+          <ToolSteps steps={message.toolSteps ?? []} />
           <Citations sources={message.citations} />
-          {message.origin && message.origin !== "welcome" && <div className="rc-chat-answer-meta"><span>{message.origin === "model" ? "Live model response · based on this run" : "From retrieved evidence"}</span><CopyReply content={message.content} /></div>}
+          {message.origin && message.origin !== "welcome" && <div className="rc-chat-answer-meta"><span>{message.origin !== "model" ? "From retrieved evidence" : message.toolSteps?.length ? "Live model + Cala lookups" : "Live model response · based on this run"}</span><CopyReply content={message.content} /></div>}
         </div>
       </div>)}
-      {busy && <div className="rc-chat-thinking" role="status"><LoaderCircle size={14} className="spinning" /><span>Generating a reply from your round evidence…</span></div>}
+      {busy && <div className="rc-chat-thinking" role="status">
+        <div className="rc-chat-thinking-line"><LoaderCircle size={14} className="spinning" /><span>{liveSteps.length ? "Working through Cala…" : "Thinking about your round evidence…"}</span></div>
+        {liveSteps.length > 0 && <ToolStepList steps={liveSteps} />}
+      </div>}
       {error && <div className="rc-chat-error" role="alert"><p>{error}</p>{failedQuestion && <button type="button" disabled={busy} onClick={() => void send(failedQuestion.message, failedQuestion.investorId)}><RotateCcw size={12} />Retry question</button>}</div>}
     </div>
     <div className="rc-chat-suggestions" aria-label="Suggested questions">{SUGGESTIONS.map((suggestion, index) => {

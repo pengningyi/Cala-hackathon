@@ -20,7 +20,7 @@ from .cala import CalaError, CalaMCPProvider
 from .entity_metadata import date_value as _date, parse_entity as _entity, property_value as _value, sources as _sources
 from .models import (
     DetectedLead, Entity, EntityMetadataProperty, FundEvent, FundingRound, GraphSnapshot, InvestmentObservation,
-    InvestorProfile, Participation, Role,
+    InvestorProfile, KnowledgeAnswer, Participation, Role,
 )
 from .runtime import BudgetExceeded
 
@@ -449,6 +449,31 @@ class CalaNativeProvider:
             raise CalaError("cala_entity_mismatch", "Cala returned a different person")
         person = _entity(response.data, response.retrieved_at)
         return _roles(response.data, response.retrieved_at, "outgoing", person)
+
+    async def funding_round(self, event_id: str) -> FundingRound | None:
+        """One identified funding event: issuer company, date, stage, amount and participants."""
+        return await self._read_round(event_id)
+
+    async def knowledge_search(self, query: str) -> KnowledgeAnswer:
+        """Sourced natural-language search. Slow (tens of seconds) and not a typed join."""
+        tools = {item["name"]: item for item in await self.discover_tools()}
+        schema = tools.get("knowledge_search", {}).get("inputSchema") or {}
+        properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        # Use the advertised argument name rather than assuming one.
+        names = [name for name in ("input", "query", "question", "q") if name in properties]
+        if not names:
+            names = [name for name in schema.get("required", []) if properties.get(name, {}).get("type") == "string"]
+        response = await self._call("knowledge_search", {(names[0] if names else "input"): query})
+        data = response.data
+        text = ""
+        if isinstance(data, dict):
+            for key in ("content", "answer", "result", "text", "summary"):
+                if isinstance(data.get(key), str) and data[key].strip():
+                    text = data[key].strip()
+                    break
+        elif isinstance(data, str):
+            text = data.strip()
+        return KnowledgeAnswer(text=text[:4000], sources=_sources(data, response.retrieved_at)[:12])
 
     async def _investor(self, investor_id: str) -> tuple[ToolPayload, dict]:
         # People and fund edges ride on the same projection call: no extra budget.

@@ -140,6 +140,8 @@ class Retrieval:
             self.trace.emit(step, "Using cached Cala response", type="tool_result", tool=trace_tool,
                             query=trace_query, cached=True, count=_count(value))
             return value
+        slow = operation == "knowledge_query_entities" or (
+            operation == "call_data_tool" and args.get("tool") in ("knowledge_search", "knowledge_query"))
         for attempt in range(2):
             # Semaphore wait counts against the same global deadline.
             try:
@@ -150,7 +152,7 @@ class Retrieval:
                         self.calls += 1
                         self.trace.emit(step, "Calling Cala", type="tool_call", tool=trace_tool,
                                         query=trace_query, cached=False)
-                        per_call = (self.settings.cala_query_timeout_seconds if operation == "knowledge_query_entities"
+                        per_call = (self.settings.cala_query_timeout_seconds if slow
                                     else self.settings.cala_request_timeout_seconds)
                         async with asyncio.timeout(min(self.remaining(), per_call)):
                             value = await getattr(self.provider, operation)(**args)
@@ -162,7 +164,8 @@ class Retrieval:
                                 query=trace_query, cached=False, count=_count(value))
                 return value
             except TimeoutError:
-                if attempt or self.remaining() <= 0:
+                # A slow free-text query that timed out once is not retried.
+                if attempt or self.remaining() <= 0 or (slow and operation == "call_data_tool"):
                     raise BudgetExceeded("Cala retrieval timed out") from None
                 self.trace.emit(step, "Transient request timeout; retrying once", type="retry", tool=trace_tool)
             except CalaError as exc:

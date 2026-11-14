@@ -358,6 +358,31 @@ are controlled by `CHAT_TIMEOUT_SECONDS` and `CHAT_MAX_CONCURRENCY` separately
 from discovery. Provider failures, invalid output and timeouts use the standard
 error envelope so the UI can retain the question and offer a retry.
 
+### Cala tool-calling agent
+
+With `MODEL_PROVIDER=openai_compatible`, a configured Cala adapter and
+`CHAT_AGENT_ENABLED=true` (the default), chat is an agent
+(`backend/app/chat_agent.py`). The model may call bounded Cala tools while
+answering: `search_entities`, `get_entity_details`, `get_investor_profile`,
+`get_funding_round` (issuer, date, stage and all participants of one round),
+`get_company_funding_rounds`, `get_organisation_people`, `get_person_roles` and,
+when `CHAT_KNOWLEDGE_SEARCH=true`, the slow `knowledge_search`. It ends with a
+`final_answer` tool call. Lookups go through the same cache, retry and budget
+code as discovery, capped per question by `CHAT_CALA_CALL_LIMIT` (24) and
+`CHAT_MAX_TOOL_ROUNDS` (6). The last 30 s of `CHAT_TIMEOUT_SECONDS` (90) is
+reserved for writing the answer. Sources returned by tools join the citation
+catalog, so answers can cite them under the same server-side validation. Tool
+findings are labelled as live lookups and never change the saved result. The
+Codex provider keeps snapshot-only chat.
+
+`POST /api/runs/{id}/chat/stream` takes the same request and returns
+`text/event-stream`. It sends one `step` event for each lookup state change,
+with fields `{id, tool, label, arguments, status: started|done|failed, count, error}`.
+The stream ends with one `answer` event (a chat response) or one `error` event
+(`{code, message, status}`). Run-readiness and selection errors are returned as
+normal JSON errors before the stream starts. Responses from both endpoints
+include `tool_steps`, the lookups used for that answer.
+
 ## Errors and retention
 
 Errors have `{"error":{"code":"...","message":"...","details":null}}`.

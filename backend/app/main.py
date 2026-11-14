@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, Request
@@ -14,6 +15,7 @@ from .cala import CalaError, CalaMCPProvider
 from .cala_native import CalaNativeProvider
 from .cala_rest import CalaKnowledgeResolver
 from .config import Settings
+from .chat_agent import ChatAgent
 from .chat_model import ChatModelError, LiveResultChat
 from .models import (
     ChatRequest, ChatResponse, CompanyConfirmation, CompanyMatchRequest, CompanyMatches,
@@ -63,7 +65,14 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
         semantic = OpenAICompatibleSemantic(base_url=settings.model_base_url, api_key=settings.model_api_key,
                                             model=settings.model_name, timeout_seconds=settings.model_timeout_seconds)
     workflow = Workflow(settings, provider, semantic, identity)
-    chat_service = chat if chat is not None else LiveResultChat(settings)
+    if chat is not None:
+        chat_service = chat
+    elif (settings.model_provider == "openai_compatible" and settings.chat_agent_enabled
+          and getattr(provider, "configured", False)):
+        # Tool-calling agent: the model may query Cala while answering.
+        chat_service = ChatAgent(settings, workflow)
+    else:
+        chat_service = LiveResultChat(settings)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -188,7 +197,61 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
             raise WorkflowError("invalid_chat_selection", "Select an investor from this run's shortlist")
         return await _connected_chat_reply(chat_service, run.result, request, http_request)
 
+    @app.post("/api/runs/{run_id}/chat/stream")
+    async def result_chat_stream(run_id: str, request: ChatRequest, http_request: Request):
+        """Server-sent events: `step` per Cala lookup, then one `answer` or `error`."""
+        run = workflow.get(run_id)
+        if run.result is None:
+            raise WorkflowError("run_not_ready", "Wait for the run result before asking about its shortlist", 409)
+        if request.selected_investor_id is not None and request.selected_investor_id not in {
+            card.investor.id for card in run.result.candidates
+        }:
+            raise WorkflowError("invalid_chat_selection", "Select an investor from this run's shortlist")
+        return StreamingResponse(_chat_events(chat_service, run.result, request, http_request),
+                                 media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
     return app
+
+
+def _frame(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(jsonable_encoder(data), ensure_ascii=False)}\n\n"
+
+
+async def _chat_events(service, result, payload, http_request):
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def on_step(step):
+        await queue.put(step)
+
+    if isinstance(service, ChatAgent):
+        generation = asyncio.create_task(service.reply(result, payload, on_step))
+    else:
+        generation = asyncio.create_task(service.reply(result, payload))
+    try:
+        while True:
+            try:
+                step = await asyncio.wait_for(queue.get(), timeout=.25)
+                yield _frame("step", step)
+                continue
+            except TimeoutError:
+                pass
+            if generation.done():
+                while not queue.empty():
+                    yield _frame("step", queue.get_nowait())
+                try:
+                    yield _frame("answer", generation.result())
+                except (ChatModelError, WorkflowError) as exc:
+                    yield _frame("error", {"code": exc.code, "message": exc.message, "status": exc.status})
+                except Exception:
+                    yield _frame("error", {"code": "chat_failed", "message": "The assistant could not finish. Please retry.", "status": 500})
+                return
+            if await http_request.is_disconnected():
+                return
+    finally:
+        if not generation.done():
+            generation.cancel()
+        await asyncio.gather(generation, return_exceptions=True)
 
 
 app = create_app()

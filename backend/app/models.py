@@ -459,8 +459,28 @@ class ChatRequest(Model):
     selected_investor_id: str | None = Field(default=None, max_length=300)
 
 
+class ChatToolStep(Model):
+    """One Cala lookup the chat agent ran while answering."""
+    id: str
+    tool: str
+    label: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["started", "done", "failed"]
+    count: int | None = None
+    error: str | None = None
+
+
+class KnowledgeAnswer(Model):
+    """Sourced free-text answer from Cala knowledge_search."""
+    text: str = ""
+    sources: list[Source] = Field(default_factory=list)
+
+
 class ChatResponse(Model):
     message: str = Field(min_length=1, max_length=6000)
     citations: list[Source] = Field(default_factory=list, max_length=16)
+    # The answer's own reference IDs (e.g. "s15"), aligned with `citations`, so the UI can link inline markers.
+    citation_ids: list[str] = Field(default_factory=list, max_length=16)
     candidate_ids: list[str] = Field(default_factory=list, max_length=5)
     model_used: bool
+    tool_steps: list[ChatToolStep] = Field(default_factory=list, max_length=40)
