@@ -257,21 +257,42 @@ class OpenAICompatibleChatTransport:
         self.base_url, self._api_key, self.model = base_url.rstrip("/"), api_key, model
         self.timeout_seconds = timeout_seconds
 
+    def _schema_payload(self, messages):
+        return {"model": self.model, "messages": messages,
+                "response_format": {"type": "json_schema", "json_schema": {
+                    "name": "roundcloser_answer", "strict": True, "schema": OUTPUT_SCHEMA,
+                }}, "max_completion_tokens": 2400}
+
+    def _json_object_payload(self, messages):
+        # Providers without structured outputs (e.g. DeepSeek) accept only json_object mode, which
+        # needs the schema spelled out in the prompt. The reply is still validated downstream.
+        instruction = {"role": "system", "content": "Answer with a single JSON object (json) that matches "
+                       "this JSON Schema exactly, with no other text: " + json.dumps(OUTPUT_SCHEMA)}
+        return {"model": self.model, "messages": [instruction, *messages],
+                "response_format": {"type": "json_object"}, "max_tokens": 2400}
+
+    async def _post(self, client, payload):
+        async with client.stream("POST", self.base_url + "/chat/completions", headers={
+            "Authorization": f"Bearer {self._api_key}",
+        }, json=payload) as response:
+            if response.status_code == 400:
+                return None
+            response.raise_for_status()
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > MAX_OUTPUT_BYTES:
+                    raise ChatModelError("chat_invalid_output", "The model returned an invalid answer. Please retry.")
+            return content
+
     async def generate(self, messages):
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                async with client.stream("POST", self.base_url + "/chat/completions", headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                }, json={"model": self.model, "messages": messages,
-                         "response_format": {"type": "json_schema", "json_schema": {
-                             "name": "roundcloser_answer", "strict": True, "schema": OUTPUT_SCHEMA,
-                         }}, "max_completion_tokens": 2400}) as response:
-                    response.raise_for_status()
-                    content = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        content.extend(chunk)
-                        if len(content) > MAX_OUTPUT_BYTES:
-                            raise ChatModelError("chat_invalid_output", "The model returned an invalid answer. Please retry.")
+                content = await self._post(client, self._schema_payload(messages))
+                if content is None:  # structured outputs rejected: retry in plain JSON mode
+                    content = await self._post(client, self._json_object_payload(messages))
+                if content is None:
+                    raise ValueError("Request rejected")
             raw = json.loads(content)["choices"][0]["message"]["content"]
             if not isinstance(raw, str):
                 raise ValueError("Expected text")

@@ -289,6 +289,27 @@ def test_openai_compatible_transport_uses_runner_configuration_and_real_history(
     assert payload["response_format"]["json_schema"]["strict"] is True
 
 
+
+def test_model_api_falls_back_to_json_object_when_structured_outputs_are_rejected(saved_result, monkeypatch):
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if requests[-1]["response_format"]["type"] == "json_schema":
+            return httpx.Response(400, json={"error": {"message": "This response_format type is unavailable now"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({
+            "message": "A provider-generated answer", "source_ids": ["s1"], "candidate_ids": [],
+        })}}]})
+
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(chat_model.httpx, "AsyncClient", lambda **kwargs: client_class(
+        transport=httpx.MockTransport(respond), **kwargs))
+    provider = OpenAICompatibleChatTransport("https://model.example.test/v1", "test-only-secret", "model")
+    reply = asyncio.run(LiveResultChat(config(), provider).reply(saved_result, ChatRequest(message="Why?")))
+    assert reply.model_used is True
+    assert [r["response_format"]["type"] for r in requests] == ["json_schema", "json_object"]
+    assert "JSON Schema" in requests[1]["messages"][0]["content"] and "max_tokens" in requests[1]
+
 @pytest.mark.parametrize("timeout", [False, True])
 def test_model_api_errors_are_sanitized_and_never_expose_response_or_credentials(saved_result, monkeypatch, timeout):
     def respond(request):
