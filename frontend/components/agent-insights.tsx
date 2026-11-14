@@ -4,18 +4,20 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import { MessageCircle, Radio } from "lucide-react";
 import type { RunResult } from "../lib/types";
 import ResultsChat from "./results-chat";
+import type { ReportTurn } from "../lib/run-report";
 
 interface Props {
   result: RunResult;
   selectedInvestorId: string | null;
   onSelectInvestor: (id: string | null) => void;
   trace: ReactNode;
+  onConversationChange?: (turns: ReportTurn[]) => void;
 }
 
 type Tab = "chat" | "activity";
 
 /** Live result conversation and the original search trace share one panel. */
-export default function AgentInsights({ result, selectedInvestorId, onSelectInvestor, trace }: Props) {
+export default function AgentInsights({ result, selectedInvestorId, onSelectInvestor, trace, onConversationChange }: Props) {
   const [tab, setTab] = useState<Tab>("chat");
   const id = useId();
   const chatTab = useRef<HTMLButtonElement>(null);
@@ -47,7 +49,7 @@ export default function AgentInsights({ result, selectedInvestorId, onSelectInve
     </div>
     <div id={`${id}-chat`} role="tabpanel" aria-labelledby={`${id}-chat-tab`}
       className="agent-insight-panel agent-insight-chat" hidden={tab !== "chat"}>
-      <ResultsChat key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={onSelectInvestor} embedded active={tab === "chat"} />
+      <ResultsChat key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={onSelectInvestor} embedded active={tab === "chat"} onConversationChange={onConversationChange} />
     </div>
     <div id={`${id}-activity`} role="tabpanel" aria-labelledby={`${id}-activity-tab`} tabIndex={0}
       className="agent-insight-panel agent-insight-activity" hidden={tab !== "activity"}>{trace}</div>

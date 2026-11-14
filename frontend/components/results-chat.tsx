@@ -5,6 +5,7 @@ import { AlertCircle, ArrowUpRight, Check, ChevronDown, Copy, Database, External
 import { streamRunChat, type ChatHistoryMessage, type ChatToolStep } from "../lib/chat-api";
 import ChatMarkdown from "./chat-markdown";
 import type { RunResult, Source } from "../lib/types";
+import type { ReportTurn } from "../lib/run-report";
 
 interface ResultsChatProps {
   result: RunResult;
@@ -12,6 +13,8 @@ interface ResultsChatProps {
   onSelectInvestor: (id: string | null) => void;
   embedded?: boolean;
   active?: boolean;
+  /** Completed turns (no welcome, no failed questions), for the round report. */
+  onConversationChange?: (turns: ReportTurn[]) => void;
 }
 
 interface Message {
@@ -107,7 +110,7 @@ function CopyReply({ content }: { content: string }) {
 }
 
 /** A conversation scoped to one immutable run, synchronized with graph selection. */
-export default function ResultsChat({ result, selectedInvestorId, onSelectInvestor, embedded = false, active = true }: ResultsChatProps) {
+export default function ResultsChat({ result, selectedInvestorId, onSelectInvestor, embedded = false, active = true, onConversationChange }: ResultsChatProps) {
   const [messages, setMessages] = useState<Message[]>(() => [welcome(result)]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -136,6 +139,12 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
     }
   }, [result]);
   useEffect(() => () => { requestVersion.current += 1; controllerRef.current?.abort(); }, []);
+  const reportListener = useRef(onConversationChange);
+  reportListener.current = onConversationChange;
+  useEffect(() => {
+    reportListener.current?.(messages.filter(message => message.origin !== "welcome" && !message.failed)
+      .map(message => ({ role: message.role, content: message.content, candidateIds: message.candidateIds })));
+  }, [messages]);
   useEffect(() => {
     if (!active) return;
     const thread = threadRef.current;

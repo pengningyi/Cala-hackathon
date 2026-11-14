@@ -370,3 +370,37 @@ test("reduced motion preserves canvas expansion and evidence on a narrow screen"
   await expect(page.getByRole("button", { name: "Select Kibo Ventures", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
+
+test("the shortlist generates a round report with next actions and chat highlights", async ({ page }) => {
+  await page.route("**/api/runs/v2-run/chat/stream", route => route.fulfill({ contentType: "text/event-stream", body:
+    `event: answer\ndata: ${JSON.stringify({ message: "Kibo Ventures is your strongest fit. It co-invested with your lead.\n\n- Ask Synthetic Lead to introduce you to Kibo Ventures this week",
+      citations: [], citation_ids: [], candidate_ids: ["kibo"], model_used: true, tool_steps: [] })}\n\n` }));
+  await openGraph(page);
+  await page.getByLabel("Ask about your investors").fill("Why Kibo?");
+  await page.getByRole("button", { name: "Send question" }).click();
+  await expect(page.getByText("Kibo Ventures is your strongest fit.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Generate report" }).click();
+  const report = page.getByRole("dialog", { name: /Round report/ });
+  await expect(report).toBeVisible();
+  await expect(report.getByRole("heading", { name: "Key next actions" })).toBeVisible();
+  await expect(report.getByText("Ask Synthetic Lead to introduce you to Kibo Ventures this week.")).toBeVisible();
+  await expect(report.locator(".run-report-q")).toHaveText("Why Kibo?");
+  await expect(report.locator(".run-report-investors li").first()).toContainText("Kibo Ventures");
+  const caveats = report.getByRole("button", { name: /Caveats/ });
+  await expect(caveats).toHaveAttribute("aria-expanded", "false");
+  await expect(report.locator(".run-report-caveats")).toBeHidden();
+  await caveats.click();
+  await expect(report.locator(".run-report-caveats")).toBeVisible();
+  await expect(report.getByText("Coverage is partial")).toBeVisible();
+
+  await report.getByRole("button", { name: "Copy report as Markdown" }).click();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("## Key next actions");
+  expect(copied).toContain("## Conversation highlights");
+  const download = page.waitForEvent("download");
+  await report.getByRole("button", { name: "Download .md" }).click();
+  expect((await download).suggestedFilename()).toMatch(/report-\d{4}-\d{2}-\d{2}\.md$/);
+  await report.getByRole("button", { name: "Close report" }).click();
+  await expect(report).toBeHidden();
+});
