@@ -1,5 +1,31 @@
 # Branch-basic implementation and verification
 
+## Canvas knowledge graph explorer — 14 November 2026
+
+The `force-knowledge-graph` skill now guides the results diagram. A client-only
+`react-force-graph-2d` renderer replaces the SVG physics view. Organizations remain
+circles and people squares, sized by unique neighbors. Funding events remain
+individually sourced edges to their actual recipient, with separate curved lines
+for parallel evidence. No scoring, allocations or full-metadata retrieval changed.
+
+The explorer adds entity search, entity and relationship whitelists, directions
+relative to explored hubs, an accessible entity browser, pointer context menus,
+expanded view and PNG export. Zoom reveals markers, icons, short labels and full
+cards. Selected names stay readable in the overview. Explicit focus takes priority
+over the initial settled fit, and position memory survives filtering and expansion.
+
+Expansion still uses only the retrieved, bounded run snapshot; it does not invent
+relationships or make additional Cala/model calls. The inspector retains event
+dates, role validity, field metadata and source publication/retrieval dates. The
+founder-selected lead route stays separate from sourced public evidence.
+Reduced motion disables particles, animated camera transitions and animated settles.
+
+Verification includes nine new adapter/filter/curvature/position tests and six
+mocked browser cases covering evidence, filters, expansion, zoom, pointer and
+keyboard actions, reduced motion, PNG export and expanded view. A saved Cala
+replay renders 27 entities and 56 connections without browser errors or horizontal
+overflow at 1440, 768 and 390 pixels. Production build and typecheck pass.
+
 ## Physical graph exploration — 14 November 2026
 
 Nodes now use springs, neighbor repulsion and collisions that account for their

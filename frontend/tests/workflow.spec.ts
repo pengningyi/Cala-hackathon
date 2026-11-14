@@ -80,7 +80,9 @@ test("real Cala search streams, copies follow-up drafts and reruns a do-not-cont
 
   await page.getByRole("button", { name: "Select Accel", exact: true }).click();
   await expect(page.locator(".rc-chat-selection")).toContainText("Accel");
-  await expect(page.getByRole("button", { name: /^(Shortlisted investor|Investor requiring review): Accel$/ })).toHaveAttribute("aria-pressed", "true");
+  const graph = page.getByRole("region", { name: "Founder and investor knowledge graph" });
+  await graph.getByRole("button", { name: "View selection details", exact: true }).click();
+  await expect(graph.locator(".kg-inspector h3")).toHaveText("Accel");
   await expect(page.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByLabel("Ask about your investors", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Agent activity", exact: true }).click();
@@ -92,11 +94,15 @@ test("real Cala search streams, copies follow-up drafts and reruns a do-not-cont
   await page.getByRole("tab", { name: "Chat", exact: true }).click();
   await expect(page.locator(".rc-chat-selection")).toContainText("Accel");
 
-  const graphTransform = await page.locator(".kg-canvas > g").getAttribute("transform");
-  await page.getByRole("button", { name: "Zoom graph in", exact: true }).click();
-  expect(await page.locator(".kg-canvas > g").getAttribute("transform")).not.toBe(graphTransform);
-  await page.getByRole("button", { name: "Reset graph view", exact: true }).click();
-  await page.locator("[data-kg-edge]").filter({ has: page.locator(".kg-edge-investment") }).first().click();
+  const graphViewport = graph.locator("[data-kg-zoom]");
+  const graphZoom = Number(await graphViewport.getAttribute("data-kg-zoom"));
+  await graph.getByRole("button", { name: "Zoom graph in", exact: true }).click();
+  await expect.poll(async () => Number(await graphViewport.getAttribute("data-kg-zoom"))).toBeGreaterThan(graphZoom);
+  await graph.getByRole("button", { name: "Fit all graph entities", exact: true }).click();
+  const investment = graph.locator(".kg-connection-button").filter({ hasText: /investment/i }).first();
+  await investment.focus();
+  await page.keyboard.press("Enter");
+  await expect(graph.locator(".kg-inspector")).toContainText("Funding event evidence");
   await expect(page.locator(".kg-inspector")).toContainText("Recipient");
   expect(await page.locator(".kg-inspector .kg-source-list a").count()).toBeGreaterThan(0);
   await page.screenshot({ path: ".qa/results-workspace-desktop.png", fullPage: true });

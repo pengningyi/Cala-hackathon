@@ -30,17 +30,22 @@ The knowledge graph uses circles for organizations and squares for people.
 Funding rounds are dated, sourced connections to the funded company, rather than
 nodes. Person connections come from retrieved professional roles and sourced
 paths; an affiliation does not establish a personal relationship. Node size
-reflects distinct neighbors in the displayed network. Click an entity or
-connection to inspect its evidence, and click it again to clear the focus.
-Dragging pins a node temporarily: nearby nodes move aside and the released node
-springs back toward its hub. Double-click a node or use **Expand connections**
-to make it a hub and reveal more of its already retrieved neighborhood. Collapse
-removes connections that are no longer needed by another expanded hub.
+reflects distinct neighbors in the displayed network. The client-only
+`react-force-graph-2d` canvas renderer uses short d3-force settles and remembers
+positions when filtering. Click an entity or connection for its context menu;
+**View details & evidence** opens the sourced inspector. Dragging pins a node
+temporarily; release clears the pin and lets the network settle. Use **Expand
+connections** to make it a hub and reveal more of its already retrieved
+neighborhood. Collapse preserves neighbors needed by another expanded hub.
 
-Zoom changes the node presentation from small points to type icons to named
-cards. The controls, mouse wheel and touch gestures adjust the view; the mobile
-entity picker locates an individual person or organization. Motion pauses offscreen
-and when settled, respects reduced-motion preferences, and adds no Cala/model calls.
+Zoom changes nodes from markers to type icons, short labels and detailed cards.
+Selected and hovered names remain readable in the overview. The explorer includes
+entity search, entity/relation whitelists, incoming/outgoing filters relative to
+explored hubs, an accessible entity browser, expanded view and PNG export. The
+first fit waits for settling and never overrides an explicit focus/zoom action.
+Positions survive filter toggles. Directional particles follow selected evidence;
+they are disabled with reduced motion. Rendering pauses offscreen or in hidden
+tabs. Exploration uses the saved run snapshot and adds no Cala/model calls.
 
 The search-progress panel uses the local looping `public/obsidian-network.gif`.
 It is served directly to preserve animation, with the supplied still image used

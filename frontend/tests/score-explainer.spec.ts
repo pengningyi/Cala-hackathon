@@ -175,7 +175,7 @@ test("rule scoring is explained: rules met, checklist, trust loops and the actio
   await expect(cap).toContainText("Your investor");
   await page.getByRole("button", { name: "Select Cap Table Fund", exact: true }).click();
   await expect(cap).toContainText("Reach out directly");
-  await expect(page.locator(".kg-edge-trust")).not.toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Founder and investor knowledge graph" }).locator("canvas").first()).toBeVisible();
   await page.getByRole("button", { name: "View details for Cap Table Fund", exact: true }).click();
   const capDialog = page.getByRole("dialog");
   await expect(capDialog).toContainText("Your founder network");
@@ -186,110 +186,185 @@ test("rule scoring is explained: rules met, checklist, trust loops and the actio
   expect(errors).toEqual([]);
 });
 
-test("entity graph toggles people and funding evidence, sizes by neighbors and resets node drags", async ({ page }) => {
+async function browseGraphEntities(graph: ReturnType<Page["getByRole"]>) {
+  const toggle = graph.getByRole("button", { name: "Toggle explored entities", exact: true });
+  if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+  const summary = graph.locator("summary").filter({ hasText: /^Browse entities/ });
+  if (!(await summary.evaluate(element => element.parentElement?.hasAttribute("open")))) await summary.click();
+}
+
+async function zoomGraphToDetail(page: Page, graph: ReturnType<Page["getByRole"]>, target: "marker" | "icon" | "short" | "full") {
+  const stage = graph.locator("[data-kg-detail]");
+  const levels = ["marker", "icon", "short", "full"];
+  for (let step = 0; step < 18 && await stage.getAttribute("data-kg-detail") !== target; step++) {
+    const previous = Number(await stage.getAttribute("data-kg-zoom"));
+    const current = levels.indexOf((await stage.getAttribute("data-kg-detail"))!);
+    const increasing = current < levels.indexOf(target);
+    const next = Math.min(20, Math.max(.1, previous * (increasing ? 1.5 : 1 / 1.5)));
+    await graph.getByRole("button", { name: increasing ? "Zoom graph in" : "Zoom graph out", exact: true }).click();
+    await expect.poll(async () => Number(await stage.getAttribute("data-kg-zoom"))).toBeCloseTo(next, 3);
+  }
+  await expect(stage).toHaveAttribute("data-kg-detail", target);
+}
+
+test("canvas entity inspection preserves role and funding evidence and synchronizes the shortlist", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const graph = await openGraph(page);
-  await graph.getByRole("button", { name: "Show all connections", exact: true }).click();
+  await expect(graph.locator("canvas").first()).toBeVisible();
   await expect(graph.locator(".kg-column-label, .kg-node-round")).toHaveCount(0);
+  await browseGraphEntities(graph);
 
-  const person = graph.getByRole("button", { name: "Person: Sonia Fernandez", exact: true });
-  const founder = graph.getByRole("button", { name: "Person: Elisenda", exact: true });
-  await expect(person.locator("rect.kg-node-shape")).toHaveCount(1);
-  await expect(person.locator("circle.kg-node-shape")).toHaveCount(0);
-  await person.click();
+  const person = graph.getByRole("button", { name: "Inspect Person: Sonia Fernandez", exact: true });
+  await person.focus();
+  await page.keyboard.press("Enter");
   await expect(person).toHaveAttribute("aria-pressed", "true");
   await expect(graph.locator(".kg-inspector h3")).toHaveText("Sonia Fernandez");
   await expect(page.locator(".workspace-investor-select[aria-pressed='true']")).toHaveCount(0);
-  await person.click();
-  await expect(person).toHaveAttribute("aria-pressed", "false");
-  await person.click();
-  await graph.locator(".kg-connection-button").filter({ hasText: "Sonia Fernandez → Synthetic Lead" }).click();
+  await expect(graph.locator("[data-kg-detail]")).toHaveAttribute("data-kg-detail", "full");
+
+  await graph.locator(".kg-connection-button").filter({ hasText: /Sonia Fernandez.*Synthetic Lead/ }).click();
   await expect(graph.locator(".kg-inspector")).toContainText("Current, explicitly reported by Cala");
   await expect(graph.locator(".kg-inspector")).not.toContainText("Historical role");
-  await graph.getByRole("button", { name: "Clear graph selection", exact: true }).click();
-  await founder.focus();
-  await page.keyboard.press("Enter");
-  await expect(founder).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Space");
-  await expect(founder).toHaveAttribute("aria-pressed", "false");
-
-  const degrees = await graph.locator("[data-kg-node]").evaluateAll(nodes => nodes.map(node => ({
-    degree: Number(node.getAttribute("data-kg-degree")), radius: Number(node.getAttribute("data-kg-radius")),
-  })));
-  const least = degrees.reduce((a, b) => a.degree < b.degree ? a : b);
-  const most = degrees.reduce((a, b) => a.degree > b.degree ? a : b);
-  expect(most.degree).toBeGreaterThan(least.degree);
-  expect(most.radius).toBeGreaterThan(least.radius);
-
-  const investment = graph.locator("[data-kg-edge]").filter({ has: page.locator(".kg-edge-investment") }).first();
-  await investment.focus();
-  await page.keyboard.press("Enter");
-  await expect(investment).toHaveAttribute("aria-pressed", "true");
-  await expect(graph.locator(".kg-inspector")).toContainText("Funding event evidence");
-  await expect(graph.locator(".kg-inspector")).toContainText("Recipient");
   await expect(graph.locator(".kg-inspector .kg-source-list a").first()).toHaveAttribute("href", source.url);
-  await page.keyboard.press("Enter");
-  await expect(investment).toHaveAttribute("aria-pressed", "false");
+  await expect(graph.locator(".kg-inspector")).toContainText("Published 1 Oct 2026");
+  await expect(graph.locator(".kg-inspector")).toContainText("Retrieved 14 Nov 2026");
 
-  await person.scrollIntoViewIfNeeded();
-  const initial = { x: Number(await person.getAttribute("data-kg-x")), y: Number(await person.getAttribute("data-kg-y")) };
-  const displacement = async () => Math.hypot(Number(await person.getAttribute("data-kg-x")) - initial.x,
-    Number(await person.getAttribute("data-kg-y")) - initial.y);
-  const position = await person.locator(".kg-node-shape").boundingBox();
-  expect(position).not.toBeNull();
-  await page.mouse.move(position!.x + position!.width / 2, position!.y + position!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(position!.x + position!.width / 2 + 32, position!.y + position!.height / 2 + 24, { steps: 6 });
-  expect(await displacement()).toBeGreaterThan(10);
-  await page.mouse.up();
-  await expect.poll(displacement, { timeout: 15_000 }).toBeLessThan(15);
-  await graph.getByRole("button", { name: "Reset graph view", exact: true }).click();
-  await expect.poll(displacement, { timeout: 15_000 }).toBeLessThan(15);
+  const founder = graph.getByRole("button", { name: "Inspect Person: Elisenda", exact: true });
+  await founder.focus();
+  await page.keyboard.press("Space");
+  await expect(founder).toHaveAttribute("aria-pressed", "true");
+  await expect(person).toHaveAttribute("aria-pressed", "false");
+  await expect(graph.locator(".kg-inspector h3")).toHaveText("Elisenda");
+
+  const investor = graph.getByRole("button", { name: "Inspect Shortlisted investor: Kibo Ventures", exact: true });
+  await investor.click();
+  await expect(page.getByRole("button", { name: "Select Kibo Ventures", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await graph.locator(".kg-connection-button").filter({ hasText: /Kibo Ventures.*Portfolio Co/ }).first().click();
+  await expect(graph.locator(".kg-inspector")).toContainText("Funding event evidence");
+  await expect(graph.locator(".kg-evidence-facts")).toContainText("RecipientPortfolio Co");
+  await expect(graph.locator(".kg-evidence-facts")).toContainText("1 Mar 2026");
+  await expect(graph.locator(".kg-inspector .kg-source-list a").first()).toHaveAttribute("href", source.url);
+  await expect(page.locator(".workspace-investor-select[aria-pressed='true']")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Select Other Fund", exact: true }).click();
+  await expect(graph.locator(".kg-inspector h3")).toHaveText("Other Fund");
+  await expect(graph.getByRole("button", { name: "Inspect Shortlisted investor: Other Fund", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(errors).toEqual([]);
 });
 
-test("expanding a node reveals sourced neighbors as a hub and zoom changes node detail", async ({ page }) => {
+test("expanding a canvas hub reveals sourced neighbors and all zoom detail levels remain available", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const graph = await openGraph(page, 14);
-  const canvas = graph.locator(".kg-canvas-wrap");
-  const investor = graph.getByRole("button", { name: "Shortlisted investor: Kibo Ventures", exact: true });
-  const before = await graph.locator("[data-kg-node]").count();
-  await investor.locator(".kg-node-shape").dblclick();
-  await expect(investor).toHaveAttribute("data-kg-expanded", "true");
-  await expect.poll(() => graph.locator("[data-kg-node]").count()).toBeGreaterThan(before);
-  await expect(graph.locator(".kg-inspector")).toContainText("Kibo Ventures");
+  await browseGraphEntities(graph);
+  await graph.getByRole("button", { name: "Inspect Shortlisted investor: Kibo Ventures", exact: true }).click();
+  const stage = graph.locator("[data-kg-detail]");
+  const before = Number(await stage.getAttribute("data-kg-node-count"));
+  await graph.getByRole("button", { name: "Expand connections for Kibo Ventures", exact: true }).click();
+  await expect.poll(async () => Number(await stage.getAttribute("data-kg-node-count"))).toBeGreaterThan(before);
+  await expect(graph.locator('[data-graph-seed="entity:kibo"]')).toBeVisible();
+  await expect(graph.locator(".kg-inspector")).toContainText("Explored hub");
+  await expect(graph.locator(".kg-inspector .kg-source-list a").first()).toHaveAttribute("href", source.url);
+  await expect.poll(async () => Number(await stage.getAttribute("data-kg-zoom"))).toBeCloseTo(8, 3);
 
-  const zoomOut = graph.getByRole("button", { name: "Zoom graph out", exact: true });
-  for (let step = 0; step < 40 && await zoomOut.isEnabled(); step++) await zoomOut.click();
-  await expect(canvas).toHaveAttribute("data-kg-detail", "dot");
-  const zoomIn = graph.getByRole("button", { name: "Zoom graph in", exact: true });
-  for (let step = 0; step < 40 && await canvas.getAttribute("data-kg-detail") !== "icon"; step++) await zoomIn.click();
-  await expect(canvas).toHaveAttribute("data-kg-detail", "icon");
-  for (let step = 0; step < 40 && await canvas.getAttribute("data-kg-detail") !== "card"; step++) await zoomIn.click();
-  await expect(canvas).toHaveAttribute("data-kg-detail", "card");
-  await expect(graph.locator(".kg-node-card").first()).toBeAttached();
-
-  await graph.getByRole("button", { name: /^Collapse connections/ }).click();
-  await expect(investor).toHaveAttribute("data-kg-expanded", "false");
-  await expect(graph.locator("[data-kg-node]")).toHaveCount(before);
+  for (const level of ["marker", "icon", "short", "full"] as const) await zoomGraphToDetail(page, graph, level);
+  await graph.getByRole("button", { name: "Collapse connections for Kibo Ventures", exact: true }).click();
+  await expect(stage).toHaveAttribute("data-kg-node-count", String(before));
+  await expect(graph.locator('[data-graph-seed="entity:kibo"]')).toHaveCount(0);
+  await graph.getByRole("button", { name: "Fit all graph entities", exact: true }).click();
+  await expect(graph.locator("canvas").first()).toBeVisible();
   expect(errors).toEqual([]);
 });
 
-test("reduced motion keeps expansion and evidence available without an animation loop", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
+test("entity and relation filters intersect while directions and search retain the founder anchor", async ({ page }) => {
   const graph = await openGraph(page, 10);
-  const before = await graph.locator("[data-kg-node]").count();
-  await expect(graph.locator(".kg-canvas")).toHaveAttribute("data-kg-reduced-motion", "true");
-  await graph.getByRole("button", { name: /^Expand connections/ }).click();
-  await expect.poll(() => graph.locator("[data-kg-node]").count()).toBeGreaterThan(before);
-  await expect(graph.locator(".kg-canvas-wrap")).toHaveAttribute("data-kg-simulating", "false");
-  await expect(graph.locator(".kg-inspector")).toContainText("Kibo Ventures");
-  await expect(graph.locator(".kg-inspector .kg-source-list a").first()).toBeAttached();
+  const stage = graph.locator("[data-kg-detail]");
+  const before = Number(await stage.getAttribute("data-kg-node-count"));
+  const entityFilter = graph.locator("details").filter({ has: page.locator("summary").filter({ hasText: /^Entities/ }) });
+  await entityFilter.locator("summary").click();
+  await entityFilter.getByRole("checkbox", { name: /^People/ }).check();
+  await expect.poll(async () => Number(await stage.getAttribute("data-kg-node-count"))).toBeLessThan(before);
+  await expect.poll(async () => Number(await stage.getAttribute("data-kg-node-count"))).toBeGreaterThan(1);
+  await entityFilter.locator("summary").click();
+  await browseGraphEntities(graph);
+  await expect(graph.getByRole("button", { name: "Inspect Person: Sonia Fernandez", exact: true })).toBeVisible();
+  await expect(graph.getByRole("button", { name: "Inspect Shortlisted investor: Kibo Ventures", exact: true })).toHaveCount(0);
+
+  await graph.getByLabel("Relationship direction", { exact: true }).selectOption("outgoing");
+  await expect(stage).toHaveAttribute("data-kg-edge-count", "0");
+  await expect(graph.getByText("No matching connections", { exact: true })).toBeVisible();
+  await graph.getByLabel("Relationship direction", { exact: true }).selectOption("incoming");
+  await expect.poll(async () => Number(await stage.getAttribute("data-kg-edge-count"))).toBeGreaterThan(0);
+
+  const relationFilter = graph.locator("details").filter({ has: page.locator("summary").filter({ hasText: /^Relations/ }) });
+  await relationFilter.locator("summary").click();
+  await relationFilter.getByRole("checkbox", { name: /^Founded/ }).check();
+  await relationFilter.locator("summary").click();
+  await expect(stage).toHaveAttribute("data-kg-node-count", "2");
+  await expect(stage).toHaveAttribute("data-kg-edge-count", "1");
+  await expect(graph.getByRole("button", { name: "Inspect Person: Elisenda", exact: true })).toBeVisible();
+  await expect(graph.getByRole("button", { name: "Inspect Person: Sonia Fernandez", exact: true })).toHaveCount(0);
+
+  await graph.getByRole("button", { name: "Clear graph filters", exact: true }).click();
+  await expect(stage).toHaveAttribute("data-kg-node-count", String(before));
+  await graph.getByLabel("Search graph entities", { exact: true }).fill("Sonia");
+  await expect(stage).toHaveAttribute("data-kg-node-count", "2");
+  await expect(graph.getByRole("button", { name: "Inspect Person: Sonia Fernandez", exact: true })).toBeVisible();
+  await expect(graph.getByRole("button", { name: "Inspect Shortlisted investor: Kibo Ventures", exact: true })).toHaveCount(0);
+  await graph.getByRole("button", { name: "Clear graph filters", exact: true }).click();
+  await expect(stage).toHaveAttribute("data-kg-node-count", String(before));
+});
+
+test("canvas nodes open a pointer menu and graph export and fullscreen remain keyboard accessible", async ({ page }) => {
+  const graph = await openGraph(page);
+  await expect(graph.locator("[data-kg-detail]")).toHaveAttribute("data-kg-simulating", "false");
+  await browseGraphEntities(graph);
+  await graph.getByRole("button", { name: "Focus Cala AI", exact: true }).click();
+  await expect(graph.locator("[data-kg-detail]")).toHaveAttribute("data-kg-detail", "full");
+  await expect.poll(async () => Number(await graph.locator("[data-kg-detail]").getAttribute("data-kg-zoom"))).toBeCloseTo(8, 1);
+  const canvas = graph.locator("canvas").first();
+  await canvas.scrollIntoViewIfNeeded();
+  await canvas.click({ position: { x: (await canvas.boundingBox())!.width / 2, y: (await canvas.boundingBox())!.height / 2 } });
+  const menu = graph.getByRole("menu", { name: "Graph selection actions", exact: true });
+  await expect(menu).toBeVisible();
+  await expect(menu).toContainText("Cala AI");
+  await menu.getByRole("menuitem", { name: "View details & evidence", exact: true }).click();
+  await expect(graph.locator(".kg-inspector h3")).toHaveText("Cala AI");
+  await graph.locator(".kg-connection-button").filter({ hasText: /Cala AI.*Synthetic Lead/ }).click();
+  await expect(graph.locator(".kg-inspector")).toContainText("Founder-selected route");
+  await expect(graph.locator(".kg-inspector")).toContainText("This route is founder supplied");
+  await expect(graph.locator(".kg-inspector .kg-source-list a")).toHaveCount(0);
+
+  const downloadEvent = page.waitForEvent("download");
+  await graph.getByRole("button", { name: "Export graph as PNG", exact: true }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe("roundcloser-connections.png");
+  expect(await download.failure()).toBeNull();
+  await graph.getByRole("button", { name: "Expand graph view", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Founder and investor knowledge graph", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Founder and investor knowledge graph" })).toBeVisible();
+});
+
+test("reduced motion preserves canvas expansion and evidence on a narrow screen", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 390, height: 900 });
-  const picker = graph.getByLabel("Find a person or organization", { exact: true });
-  await picker.selectOption("entity:kibo");
-  await picker.selectOption("entity:kibo");
-  await expect(graph.getByRole("button", { name: "Shortlisted investor: Kibo Ventures", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const graph = await openGraph(page, 10);
+  const stage = graph.locator("[data-kg-detail]");
+  await expect(stage).toHaveAttribute("data-kg-reduced-motion", "true");
+  await expect(stage).toHaveAttribute("data-kg-simulating", "false");
+  await browseGraphEntities(graph);
+  await graph.getByRole("button", { name: "Inspect Shortlisted investor: Kibo Ventures", exact: true }).click();
+  const before = Number(await stage.getAttribute("data-kg-node-count"));
+  await graph.getByRole("button", { name: "Expand connections for Kibo Ventures", exact: true }).click();
+  await expect.poll(async () => Number(await stage.getAttribute("data-kg-node-count"))).toBeGreaterThan(before);
+  await expect(stage).toHaveAttribute("data-kg-simulating", "false");
+  await expect(graph.locator(".kg-inspector h3")).toHaveText("Kibo Ventures");
+  await expect(graph.locator(".kg-inspector .kg-source-list a").first()).toHaveAttribute("href", source.url);
+  await expect(page.getByRole("button", { name: "Select Kibo Ventures", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
