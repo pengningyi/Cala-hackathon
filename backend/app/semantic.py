@@ -217,17 +217,32 @@ class OpenAICompatibleSemantic:
 
     async def assess(self, founder: FounderInput, profiles: list[InvestorProfile]) -> list[InvestorProfile]:
         prompt, allowed = _facts(founder, profiles)
+        schema_payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "cala_assessments", "strict": True, "schema": OUTPUT_SCHEMA,
+            }},
+        }
+        # Providers without structured outputs (e.g. DeepSeek) reject json_schema with
+        # HTTP 400 and accept only json_object mode, which needs the schema in the prompt.
+        # The reply is validated by _apply either way.
+        json_object_payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "Answer with a single JSON object (json) that matches this "
+                                              "JSON Schema exactly, with no other text: " + json.dumps(OUTPUT_SCHEMA)},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(self.base_url + "/chat/completions", headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                }, json={
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_schema", "json_schema": {
-                        "name": "cala_assessments", "strict": True, "schema": OUTPUT_SCHEMA,
-                    }},
-                })
+                headers = {"Authorization": f"Bearer {self._api_key}"}
+                url = self.base_url + "/chat/completions"
+                response = await client.post(url, headers=headers, json=schema_payload)
+                if response.status_code == 400:
+                    response = await client.post(url, headers=headers, json=json_object_payload)
                 response.raise_for_status()
                 raw = response.json()["choices"][0]["message"]["content"]
                 if not isinstance(raw, str):

@@ -192,6 +192,63 @@ def test_openai_compatible_transport_uses_runner_model_and_validates_output(monk
     assert requests[0].headers["Authorization"] == "Bearer test-only-secret"
 
 
+def test_openai_compatible_semantic_falls_back_to_json_object_mode(monkeypatch):
+    """DeepSeek-style providers reject json_schema with 400; retry once in json_object mode."""
+    import httpx
+    from app import semantic
+
+    founder = FounderInput.model_validate({
+        "startup": {"company_name": "Synthetic", "product_description": "Synthetic", "sector": "Synthetic",
+                    "target_customer": "Synthetic", "problem_solved": "Synthetic", "country": "Finland"},
+        "round": {"stage": "seed", "target_eur": "10", "firm_commitments_eur": "0", "lead_status": "conditional"},
+        "lead_name": "Synthetic lead",
+    })
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if requests[-1]["response_format"]["type"] == "json_schema":
+            return httpx.Response(400, json={"error": {"message": "response_format type is unavailable"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"assessments":[]}'}}]})
+
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(semantic.httpx, "AsyncClient", lambda **kwargs: client_class(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    provider = semantic.OpenAICompatibleSemantic(
+        base_url="https://api.deepseek.example.test", api_key="test-only-secret", model="deepseek-chat",
+    )
+    assert asyncio.run(provider.assess(founder, [])) == []
+    assert [r["response_format"]["type"] for r in requests] == ["json_schema", "json_object"]
+    assert requests[1]["messages"][0]["role"] == "system" and "json" in requests[1]["messages"][0]["content"]
+
+
+def test_openai_compatible_semantic_does_not_retry_other_errors(monkeypatch):
+    import httpx
+    from app import semantic
+
+    founder = FounderInput.model_validate({
+        "startup": {"company_name": "Synthetic", "product_description": "Synthetic", "sector": "Synthetic",
+                    "target_customer": "Synthetic", "problem_solved": "Synthetic", "country": "Finland"},
+        "round": {"stage": "seed", "target_eur": "10", "firm_commitments_eur": "0", "lead_status": "conditional"},
+        "lead_name": "Synthetic lead",
+    })
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(401, json={"error": {"message": "bad key"}})
+
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(semantic.httpx, "AsyncClient", lambda **kwargs: client_class(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    provider = semantic.OpenAICompatibleSemantic(base_url="https://x.test", api_key="k", model="m")
+    with pytest.raises(SemanticError):
+        asyncio.run(provider.assess(founder, []))
+    assert len(calls) == 1
+
+
 def test_semantic_profile_window_prefers_recent_companies_before_bound():
     founder = FounderInput.model_validate({
         "startup": {"company_name": "Synthetic", "product_description": "Synthetic", "sector": "Synthetic",

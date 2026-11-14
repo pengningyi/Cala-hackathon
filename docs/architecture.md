@@ -36,7 +36,7 @@ graph that make an introduction likely, not investor profiles that merely match 
 | **Evidence-gated judgement** | A semantic assessment other than "unknown" must cite sources it was given. Any change to the candidate set rejects the whole assessment | `semantic._apply`, `pipeline._execute` |
 | **Sandboxed model runtime** | The Codex CLI runs ephemeral and read-only in a temporary directory, ignoring user config. Shell, browser, plugins, multi-agent and web search are disabled. `CALA_*` credentials (and, for chat, `MODEL_*` settings) are removed from its environment | `semantic.CodexSemantic`, `chat_model.CodexChatTransport` |
 | **Prompt-injection hygiene** | Retrieved facts and chat history are passed as role-labelled JSON data under a fixed system message, not as instructions. Answer size is capped | `chat_model.build_messages` |
-| **Model-agnostic transports** | Codex CLI, or any OpenAI-compatible `/chat/completions` endpoint with JSON-schema output, selected by `MODEL_PROVIDER`. Chat also falls back to JSON-object mode for providers without structured output (e.g. DeepSeek) | `semantic.py`, `chat_model.py`, `config.py` |
+| **Model-agnostic transports** | Codex CLI, or any OpenAI-compatible `/chat/completions` endpoint with JSON-schema output, selected by `MODEL_PROVIDER`. Both fall back to JSON-object mode when a provider rejects JSON-schema output (e.g. DeepSeek) | `semantic.py`, `chat_model.py`, `config.py` |
 | **Observable agent** | Every tool call, cache hit, retry and notice is a numbered progress event, streamed over SSE and replayable from `Last-Event-ID` | `runtime.Trace`, `main.run_events` |
 | **Cost-aware memory** | Disk cache keyed by a hash of endpoint, credentials and mapping, plus operation and arguments. Writes are atomic, and identical in-flight calls are deduplicated | `runtime.ResponseCache`, `Retrieval.call` |
 
@@ -329,7 +329,7 @@ largest share so the total is exactly 100%.
   removed from its environment, and prompts go through stdin, never command-line
   arguments.
 - Both work with the local Codex CLI or any `/chat/completions` endpoint that supports
-  JSON-schema output. Chat also falls back to JSON-object mode for providers without
+  JSON-schema output. Both fall back to JSON-object mode for providers without
   structured output, such as DeepSeek.
 
 ## 5. Frontend structure
