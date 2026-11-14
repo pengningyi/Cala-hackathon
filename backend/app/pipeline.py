@@ -50,8 +50,10 @@ class OnboardingRecord:
 
 
 class Workflow:
-    def __init__(self, settings: Settings, provider, semantic=None):
+    def __init__(self, settings: Settings, provider, semantic=None, identity=None):
         self.settings, self.provider, self.semantic = settings, provider, semantic
+        # Optional REST resolver (app/cala_rest.py) for the onboarding company/lead lookup.
+        self.identity = identity
         # Include endpoint, credentials and mapping in cache identity, never in cache filenames/content.
         import hashlib
         mapping = ""
@@ -140,11 +142,16 @@ class Workflow:
         try:
             started, now = time.monotonic(), utcnow()
             notices = []
-            retrieval = Retrieval(self.provider, self.cache, self.settings, Trace(), semaphore=self.semaphore)
-            retrieval.stop_at = started + self.settings.cala_request_timeout_seconds
+            # With a REST resolver, identities and their metadata come from one knowledge query
+            # each (top three matches); otherwise MCP search plus metadata enrichment is used.
+            source = self.identity or self.provider
+            operation = "knowledge_query_entities" if self.identity else "search_entities"
+            retrieval = Retrieval(source, self.cache, self.settings, Trace(), semaphore=self.semaphore)
+            retrieval.stop_at = started + (self.settings.cala_query_timeout_seconds if self.identity
+                                           else self.settings.cala_request_timeout_seconds)
             outcomes = await asyncio.gather(
-                retrieval.call("search_entities", {"query": request.company_name, "kind": "company"}, list[Entity], "resolver_company"),
-                retrieval.call("search_entities", {"query": request.lead_name, "kind": "investor"}, list[Entity], "resolver_lead"),
+                retrieval.call(operation, {"query": request.company_name, "kind": "company"}, list[Entity], "resolver_company"),
+                retrieval.call(operation, {"query": request.lead_name, "kind": "investor"}, list[Entity], "resolver_lead"),
                 return_exceptions=True,
             )
             for outcome in outcomes:
@@ -171,7 +178,8 @@ class Workflow:
                     startups = matches[:10]
                 else:
                     leads = matches[:10]
-            if callable(getattr(self.provider, "entity_metadata", None)) and (leads or startups):
+            if (not self.identity and callable(getattr(self.provider, "entity_metadata", None))
+                    and (leads or startups)):
                 leads, startups = await self._resolve_metadata(retrieval, leads, startups, notices)
             if not startups:
                 notices.append("No company match is available. Refine the founder company name before continuing.")

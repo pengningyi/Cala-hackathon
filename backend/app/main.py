@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException
 
 from .cala import CalaError, CalaMCPProvider
 from .cala_native import CalaNativeProvider
+from .cala_rest import CalaKnowledgeResolver
 from .config import Settings
 from .chat_model import ChatModelError, LiveResultChat
 from .models import (
@@ -43,8 +44,12 @@ async def _connected_chat_reply(service, result, payload, http_request):
         await asyncio.gather(generation, connection, return_exceptions=True)
 
 
-def create_app(settings: Settings | None = None, provider=None, semantic=None, chat=None):
+def create_app(settings: Settings | None = None, provider=None, semantic=None, chat=None, identity=None):
     settings = settings or Settings()
+    if identity is None and provider is None and settings.cala_api_key:
+        # Onboarding "Confirm matches" uses Cala REST /v1/knowledge/query; the run stays on MCP.
+        identity = CalaKnowledgeResolver(settings.cala_api_key, settings.cala_rest_url,
+                                         settings.cala_query_timeout_seconds)
     if provider is None:
         common = dict(endpoint=settings.cala_mcp_url, token=settings.cala_mcp_token,
                       transport=settings.cala_transport, timeout_seconds=settings.cala_request_timeout_seconds,
@@ -57,7 +62,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
     elif semantic is None and settings.model_provider == "openai_compatible":
         semantic = OpenAICompatibleSemantic(base_url=settings.model_base_url, api_key=settings.model_api_key,
                                             model=settings.model_name, timeout_seconds=settings.model_timeout_seconds)
-    workflow = Workflow(settings, provider, semantic)
+    workflow = Workflow(settings, provider, semantic, identity)
     chat_service = chat if chat is not None else LiveResultChat(settings)
 
     @asynccontextmanager

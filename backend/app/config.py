@@ -11,11 +11,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
     cala_mcp_url: str | None = "https://api.cala.ai/mcp/"
+    # REST base for the onboarding identity lookup (POST /v1/knowledge/query).
+    cala_rest_url: str = "https://api.cala.ai"
     cala_api_key: str | None = None
     cala_mcp_token: str | None = None
     cala_transport: Literal["streamable_http", "sse"] = "streamable_http"
     cala_tool_mapping: Path | None = None
     cala_request_timeout_seconds: float = Field(default=15, gt=0, le=80)
+    # An uncached knowledge query takes ~25 s; this bounds the onboarding REST lookup.
+    cala_query_timeout_seconds: float = Field(default=40, gt=0, le=80)
     model_provider: Literal["codex", "openai_compatible", "disabled"] = "codex"
     codex_executable: str = "codex"
     model_base_url: str | None = None

@@ -150,7 +150,9 @@ class Retrieval:
                         self.calls += 1
                         self.trace.emit(step, "Calling Cala", type="tool_call", tool=trace_tool,
                                         query=trace_query, cached=False)
-                        async with asyncio.timeout(min(self.remaining(), self.settings.cala_request_timeout_seconds)):
+                        per_call = (self.settings.cala_query_timeout_seconds if operation == "knowledge_query_entities"
+                                    else self.settings.cala_request_timeout_seconds)
+                        async with asyncio.timeout(min(self.remaining(), per_call)):
                             value = await getattr(self.provider, operation)(**args)
                             value = adapter.validate_python(value)
                 retrieved = utcnow()
