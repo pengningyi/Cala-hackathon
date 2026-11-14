@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roundfill — co-investor finder on Cala</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f7fa; --panel:#ffffff; --ink:#0f172a; --ink2:#475569; --ink3:#94a3b8; --line:#e2e8f0; --line2:#cbd5e1;
+  --accent:#4f46e5; --accent-soft:#eef2ff; --good:#059669; --good-soft:#ecfdf5; --red:#dc2626; --red-soft:#fef2f2;
+  --amber:#d97706; --amber-soft:#fffbeb; --grey:#64748b; --grey-soft:#f1f5f9;
+  --mono:'JetBrains Mono',ui-monospace,monospace; --sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box} html,body{margin:0;height:100%}
+body{font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:13px;overflow:hidden}
+button{font-family:inherit;cursor:pointer}
+.mono{font-family:var(--mono)}
+.cap{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+/* layout */
+.app{display:grid;grid-template-rows:56px 1fr auto;height:100vh}
+header{display:flex;align-items:center;gap:16px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand b{font-size:16px;letter-spacing:-.01em} .brand div{font-size:10.5px;color:var(--ink3);font-family:var(--mono)}
+.question{flex:1;max-width:760px;margin:0 auto;background:var(--accent-soft);border:1px solid #c7d2fe;border-radius:10px;padding:9px 16px;font-size:15px;font-weight:600;text-align:center;color:#312e81;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{font-family:var(--mono);font-size:10.5px;padding:4px 9px;border-radius:99px;border:1px solid var(--line2);color:var(--ink2);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--amber);display:inline-block}
+.pill.live i{background:var(--good)}
+.btn{border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:500;color:var(--ink)}
+.btn:hover{border-color:var(--ink3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:disabled{opacity:.5;cursor:default}
+.main{display:grid;grid-template-columns:300px 1fr 340px;min-height:0}
+aside{background:var(--panel);border-right:1px solid var(--line);overflow:auto;padding:14px}
+.right{border-right:0;border-left:1px solid var(--line)}
+/* form */
+.field{margin-bottom:9px} .field label{display:block;font-size:11px;color:var(--ink2);margin-bottom:3px;font-weight:500}
+.field input,.field select,.field textarea{width:100%;border:1px solid var(--line2);border-radius:7px;padding:6px 8px;font:inherit;font-size:12.5px;background:#fff;color:var(--ink)}
+.field textarea{resize:vertical;min-height:34px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.hint{font-size:11px;color:var(--ink3);margin-top:2px}
+.section-t{margin:4px 0 10px;display:flex;justify-content:space-between;align-items:center}
+.confirm{border:1px solid #c7d2fe;background:var(--accent-soft);border-radius:10px;padding:10px;margin:10px 0}
+.confirm h4{margin:0 0 6px;font-size:12px}
+.cand{display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:7px;cursor:pointer;margin-bottom:3px;background:#fff;border:1px solid var(--line)}
+.cand input{margin-top:2px} .cand b{font-size:12px} .cand div{font-size:11px;color:var(--ink2)}
+.banner{font-size:11px;background:var(--amber-soft);border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:7px 9px;margin-bottom:12px}
+/* canvas */
+.canvas-wrap{position:relative;overflow:auto;background:
+  radial-gradient(circle,#dbe2ea 1px,transparent 1px) 0 0/18px 18px,var(--bg)}
+.canvas{position:relative;min-height:100%}
+.lane-h{position:absolute;top:12px}
+.lane-bg{position:absolute;top:0;bottom:0;border-radius:12px;background:rgba(255,255,255,.55);border:1px solid var(--line)}
+svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.node{position:absolute;width:196px;background:#fff;border:1px solid var(--line2);border-left:3px solid var(--line2);border-radius:9px;padding:7px 9px;cursor:pointer;transition:opacity .25s,transform .25s,box-shadow .15s;animation:pop .35s ease-out}
+.node:hover{box-shadow:0 2px 10px rgba(15,23,42,.08)}
+.node.sel{box-shadow:0 0 0 2px var(--accent)}
+.node .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.node .t{font-weight:600;font-size:12.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .s{font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .score{position:absolute;right:9px;top:6px;font-size:17px;font-weight:700;color:var(--accent)}
+.node.lead{border-left-color:var(--accent);background:var(--accent-soft)}
+.node.deal{border-left-color:#64748b}
+.node.competitor{border-left-color:var(--red);background:var(--red-soft)}
+.node.round{border-left-color:var(--good);background:var(--good-soft);width:170px}
+.node.investor{border-left-color:#818cf8}
+.node.short{border-left-color:var(--good)}
+.node.flagged{opacity:.62;border-left-color:var(--grey);background:var(--grey-soft)}
+.node.flagged.red{opacity:1;border-left-color:var(--red);background:var(--red-soft)}
+.node.dim{opacity:.18}
+.bars{display:flex;gap:2px;margin-top:5px}
+.bars span{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.bars span b{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.badge{display:inline-block;font-family:var(--mono);font-size:9.5px;padding:1px 6px;border-radius:99px;margin-top:4px;text-transform:uppercase;letter-spacing:.04em}
+.badge.red{background:var(--red);color:#fff} .badge.grey{background:var(--grey);color:#fff} .badge.amber{background:var(--amber);color:#fff}
+.badge.good{background:var(--good);color:#fff}
+@keyframes pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--ink3);gap:6px;text-align:center;padding:30px}
+.empty b{color:var(--ink2);font-size:14px}
+.legend{position:sticky;left:12px;bottom:12px;display:inline-flex;gap:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--ink2);margin:12px;z-index:3}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+/* inspector */
+.insp-empty{color:var(--ink3);text-align:center;margin-top:80px;line-height:1.6}
+.insp h2{font-size:17px;margin:4px 0 2px;letter-spacing:-.01em}
+.insp .big{font-size:30px;font-weight:700;color:var(--accent);float:right;line-height:1}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
+.tag{font-size:10.5px;border:1px solid var(--line2);border-radius:99px;padding:2px 8px;color:var(--ink2);background:#fff}
+.insp h5{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin:16px 0 6px}
+.sig{display:grid;grid-template-columns:78px 1fr 34px;gap:8px;align-items:center;margin-bottom:5px;font-size:11.5px}
+.sig .tr{height:6px;background:var(--line);border-radius:3px} .sig .tr b{display:block;height:100%;background:var(--accent);border-radius:3px}
+.sig .na{color:var(--ink3);font-size:10.5px}
+.deal-li{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:5px 0;font-size:12px}
+.deal-li span{color:var(--ink2);font-family:var(--mono);font-size:11px}
+.flag-li{border-radius:7px;padding:7px 9px;margin-bottom:5px;font-size:12px}
+.flag-li.red{background:var(--red-soft);color:#991b1b} .flag-li.grey{background:var(--grey-soft);color:#334155} .flag-li.amber{background:var(--amber-soft);color:#92400e}
+.src a{display:block;color:var(--accent);font-size:11.5px;text-decoration:none;margin-bottom:3px;word-break:break-all}
+.intro{background:var(--grey-soft);border-radius:8px;padding:9px;font-size:12px;line-height:1.5;white-space:pre-wrap}
+.reason{font-size:12.5px;line-height:1.5;color:var(--ink);background:var(--accent-soft);border-radius:8px;padding:8px 10px}
+/* bottom */
+.bottom{background:var(--panel);border-top:1px solid var(--line);height:250px;display:grid;grid-template-rows:auto 1fr;transition:height .2s}
+.bottom.min{height:36px}
+.tabs{display:flex;align-items:center;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);height:36px}
+.tab{border:0;background:none;padding:9px 12px;font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);border-bottom:2px solid transparent}
+.tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .n{background:var(--line);border-radius:99px;padding:0 6px;margin-left:4px;color:var(--ink2)}
+.tabs .sp{flex:1}
+.pane{overflow:auto;padding:12px 16px;display:none} .pane.on{display:block}
+.ov{display:grid;grid-template-columns:1.2fr 1fr;gap:28px}
+.ov h3{margin:4px 0 8px;font-size:18px;letter-spacing:-.01em}
+.ov ul{margin:0;padding-left:18px;line-height:1.75}
+.alloc-row{display:grid;grid-template-columns:150px 1fr 70px;gap:8px;align-items:center;margin-bottom:6px;font-size:12px}
+.alloc-row .tr{height:9px;background:var(--line);border-radius:5px;overflow:hidden} .alloc-row .tr b{display:block;height:100%;background:var(--accent)}
+.alloc-row.open .tr b{background:repeating-linear-gradient(45deg,#cbd5e1 0 4px,#e2e8f0 4px 8px)}
+table{border-collapse:collapse;width:100%} th{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);text-align:left;font-weight:500;padding:5px 8px;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-size:12px} tr.click{cursor:pointer} tr.click:hover td{background:var(--bg)}
+.sbar{display:inline-block;width:60px;height:6px;background:var(--line);border-radius:3px;vertical-align:middle;margin-right:6px}.sbar b{display:block;height:100%;background:var(--accent);border-radius:3px}
+.trace-step{display:flex;gap:8px;align-items:baseline;margin:6px 0 2px;font-weight:600}
+.trace-step .st{font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:4px;background:var(--line);color:var(--ink2);font-weight:500}
+.trace-step .st.done{background:var(--good-soft);color:var(--good)} .trace-step .st.run{background:var(--accent-soft);color:var(--accent)}
+.trace-step em{font-style:normal;font-weight:400;color:var(--ink2)}
+.trace-call{font-family:var(--mono);font-size:11px;color:var(--ink2);padding-left:62px;line-height:1.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trace-call b{color:var(--accent);font-weight:500}
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:20}
+.modal.on{display:flex}
+.modal-box{background:#fff;border-radius:14px;max-width:1060px;width:94vw;max-height:90vh;overflow:auto;padding:20px 24px}
+.modal-box h2{margin:0 0 4px;font-size:18px}
+.close{float:right}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid #c7d2fe;border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand"><b>Roundfill</b><div>CO-INVESTOR FINDER · ON CALA</div></div>
+  <div class="question" id="question">Who joins your lead in this round?</div>
+  <span class="pill" id="mode"><i></i><span>CHECKING…</span></span>
+  <button class="btn" id="archBtn">Architecture</button>
+</header>
+
+<div class="main">
+  <!-- LEFT: founder form -->
+  <aside>
+    <div id="demoBanner" class="banner" style="display:none">Demo mode: the investor graph below is <b>fictional sample data</b>. Run the backend with your Cala key for live data.</div>
+    <div class="section-t"><span class="cap">Your round</span><button class="btn" id="resetBtn" style="padding:3px 8px;font-size:11px">Reset to Cala test case</button></div>
+    <form id="form" autocomplete="off">
+      <div class="row2">
+        <div class="field"><label>Founder name</label><input name="founder"></div>
+        <div class="field"><label>Company *</label><input name="company" required></div>
+      </div>
+      <div class="field"><label>Website</label><input name="website"></div>
+      <div class="field"><label>Sector *</label><input name="sector" required><div class="hint">Comma-separated terms, e.g. "AI infrastructure, data"</div></div>
+      <div class="row2">
+        <div class="field"><label>HQ country</label><input name="country"></div>
+        <div class="field"><label>Stage *</label><select name="stage"><option>Pre-seed</option><option selected>Seed</option><option>Series A</option><option>Series B</option></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Round target (€) *</label><input name="target" required></div>
+        <div class="field"><label>Already committed (€) *</label><input name="committed" required></div>
+      </div>
+      <div class="field"><label>Lead investor</label><input name="lead" placeholder="Leave blank to auto-detect via Cala"></div>
+      <div class="field"><label>Investors already in (excluded)</label><input name="existing" placeholder="Comma-separated"></div>
+      <div class="field"><label>Known competitors</label><input name="competitors" placeholder="Optional; otherwise looked up in Cala"></div>
+      <button class="btn primary" style="width:100%;margin-top:4px" id="goBtn" type="submit">1 · Match entities in Cala</button>
+    </form>
+    <div id="confirmBox"></div>
+  </aside>
+
+  <!-- CENTER: graph -->
+  <div class="canvas-wrap" id="wrap">
+    <div class="canvas" id="canvas">
+      <svg class="edges" id="edges"></svg>
+      <div class="empty" id="empty"><b>Your lead's co-investment graph will grow here</b>Fill the form, confirm the matched entities, and watch the agents walk Cala's knowledge graph.</div>
+    </div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>lead</span><span><i style="background:#64748b"></i>lead's deals</span><span><i style="background:var(--good)"></i>shortlisted</span><span><i style="background:var(--grey)"></i>skip</span><span><i style="background:var(--red)"></i>conflict</span><span>line width = shared deals</span></div>
+  </div>
+
+  <!-- RIGHT: inspector -->
+  <aside class="right">
+    <div class="cap">Inspector</div>
+    <div id="insp" class="insp"><div class="insp-empty">Click any node to see<br>why it is there and the sources behind it.</div></div>
+  </aside>
+</div>
+
+<!-- BOTTOM -->
+<div class="bottom" id="bottom">
+  <div class="tabs">
+    <button class="tab on" data-p="ov">Overview</button>
+    <button class="tab" data-p="sl">Shortlist<span class="n" id="nS">0</span></button>
+    <button class="tab" data-p="fl">Flagged<span class="n" id="nF">0</span></button>
+    <button class="tab" data-p="tr">Agent trace<span class="n" id="nC">0</span></button>
+    <span class="sp"></span>
+    <span class="cap" id="foot">Data: Cala knowledge graph · every fact sourced</span>
+    <button class="tab" id="minBtn">▾</button>
+  </div>
+  <div class="pane on" id="p-ov"><div class="ov">
+    <div><div class="cap">Current understanding</div><h3 id="headline">Nothing run yet</h3><ul id="bullets"><li>Fill the form on the left. The Cala test case is pre-filled.</li></ul></div>
+    <div><div class="cap">Filling the open allocation (suggested)</div><div id="alloc" style="margin-top:12px;color:var(--ink3)">Appears after the run.</div></div>
+  </div></div>
+  <div class="pane" id="p-sl"><table><thead><tr><th>#</th><th>Investor</th><th>Score</th><th>Why</th><th>Activity</th><th>Ticket</th></tr></thead><tbody id="slBody"></tbody></table></div>
+  <div class="pane" id="p-fl"><table><thead><tr><th>Investor</th><th>Flag</th><th>Reason</th></tr></thead><tbody id="flBody"></tbody></table></div>
+  <div class="pane" id="p-tr"><div id="trace" style="color:var(--ink3)">The agent trace streams here: each step and every Cala API call.</div></div>
+</div>
+</div>
+
+<!-- Architecture modal -->
+<div class="modal" id="arch"><div class="modal-box">
+  <button class="btn close" id="archClose">Close</button>
+  <h2>How Roundfill works</h2>
+  <div style="color:var(--ink2);margin-bottom:14px">Six steps, one orchestrator. Agents call Cala; scoring is plain code; the LLM only words the output.</div>
+  <svg viewBox="0 0 1000 430" width="100%" font-family="Inter" font-size="12">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#94a3b8"/></marker></defs>
+    <rect x="10" y="10" width="980" height="62" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="500" y="35" text-anchor="middle" font-weight="700" font-size="13" fill="#312e81">Cala API  ·  api.cala.ai  ·  X-API-KEY</text>
+    <text x="500" y="56" text-anchor="middle" fill="#4338ca" font-family="JetBrains Mono" font-size="11">GET /v1/entities · POST /v1/knowledge/query · POST /v1/knowledge/search · GET /v1/entities/{id}/introspection · POST /v1/entities/{id}</text>
+    <g fill="none" stroke="#94a3b8" stroke-width="1.3" stroke-dasharray="4 4">
+      <path d="M150 72V128" marker-end="url(#ar)"/><path d="M340 72V128" marker-end="url(#ar)"/><path d="M530 72V128" marker-end="url(#ar)"/><path d="M720 72V128" marker-end="url(#ar)"/><path d="M910 72V128" marker-end="url(#ar)"/>
+    </g>
+    <g fill="#fff" stroke="#cbd5e1"><rect x="70" y="130" width="160" height="96" rx="10"/><rect x="260" y="130" width="160" height="96" rx="10" fill="#eef2ff" stroke="#4f46e5" stroke-width="2"/><rect x="450" y="130" width="160" height="96" rx="10"/><rect x="640" y="130" width="160" height="96" rx="10"/><rect x="830" y="130" width="160" height="96" rx="10"/></g>
+    <g text-anchor="middle">
+      <text x="150" y="154" font-weight="700">1 Resolver</text><text x="150" y="174" fill="#475569" font-size="11">entity_search for company</text><text x="150" y="190" fill="#475569" font-size="11">and lead; auto-detect lead</text><text x="150" y="206" fill="#475569" font-size="11">→ founder confirms</text>
+      <text x="340" y="154" font-weight="700">2 Graph Explorer</text><text x="340" y="174" fill="#475569" font-size="11">lead → its rounds (24 mo)</text><text x="340" y="190" fill="#475569" font-size="11">→ co-investors</text><text x="340" y="206" fill="#475569" font-size="11">fallback: relationships</text>
+      <text x="530" y="154" font-weight="700">3 Sector Scout</text><text x="530" y="174" fill="#475569" font-size="11">recent rounds at your</text><text x="530" y="190" fill="#475569" font-size="11">stage + sector → extra</text><text x="530" y="206" fill="#475569" font-size="11">candidates; competitors</text>
+      <text x="720" y="154" font-weight="700">4 Profiler</text><text x="720" y="174" fill="#475569" font-size="11">per candidate: rounds,</text><text x="720" y="190" fill="#475569" font-size="11">stage mix, lead ratio,</text><text x="720" y="206" fill="#475569" font-size="11">ticket, portfolio</text>
+      <text x="910" y="154" font-weight="700">6 Writer</text><text x="910" y="174" fill="#475569" font-size="11">knowledge_search for</text><text x="910" y="190" fill="#475569" font-size="11">source URLs; reason +</text><text x="910" y="206" fill="#475569" font-size="11">intro draft (LLM optional)</text>
+    </g>
+    <g fill="none" stroke="#94a3b8" stroke-width="1.3"><path d="M230 178H258" marker-end="url(#ar)"/><path d="M420 178H448" marker-end="url(#ar)"/><path d="M610 178H638" marker-end="url(#ar)"/><path d="M720 226V266" marker-end="url(#ar)"/><path d="M800 300H880V228" marker-end="url(#ar)"/></g>
+    <rect x="640" y="268" width="160" height="64" rx="10" fill="#ecfdf5" stroke="#059669"/>
+    <text x="720" y="292" text-anchor="middle" font-weight="700">5 Scorer (code)</text><text x="720" y="312" text-anchor="middle" fill="#475569" font-size="11">6 signals · 5 flag rules</text>
+    <rect x="10" y="268" width="560" height="150" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="26" y="292" font-weight="700">System</text>
+    <text x="26" y="314" fill="#334155">Browser UI (this page) ── POST /api/resolve ──▶ FastAPI backend</text>
+    <text x="26" y="334" fill="#334155">Browser UI ◀── /api/run (Server-Sent Events: step · call · node · edge · result)</text>
+    <text x="26" y="354" fill="#334155">Backend ── httpx (cached, 4 concurrent, retry on 429) ──▶ Cala API</text>
+    <text x="26" y="374" fill="#334155">Backend ── optional ──▶ LLM (Writer wording only, facts in → JSON out)</text>
+    <text x="26" y="400" fill="#64748b" font-size="11">The graph you see is drawn from the same events, so the agent trace and the picture never disagree.</text>
+    <text x="640" y="362" fill="#64748b" font-size="11">Score = 35 co-investment with lead + 20 activity</text>
+    <text x="640" y="378" fill="#64748b" font-size="11">+ 15 stage + 15 sector + 10 follows + 5 geography</text>
+    <text x="640" y="398" fill="#64748b" font-size="11">Flags: conflict · inactive · lead-only · stage · ticket</text>
+  </svg>
+</div></div>
+
+<script>
+/* =====================================================================
+   Roundfill front end. Same UI for live mode (FastAPI + Cala) and demo mode.
+   Both produce one event stream: step | call | node | edge | result | error.
+   ===================================================================== */
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const eur = v => v == null ? 'unknown' : v >= 1e6 ? `€${(v/1e6).toFixed(1)}M` : `€${Math.round(v/1e3)}k`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+
+const DEFAULT_CASE = {
+  founder: '', company: 'Cala AI', website: 'cala.ai',
+  sector: 'AI infrastructure, data infrastructure, AI agents', country: '', stage: 'Seed',
+  target: '4000000', committed: '2000000', lead: '', existing: '', competitors: ''
+};
+let LIVE = false, state = {};
+
+/* ---------------------------------------------------------- form */
+function fillForm(v){ for (const [k,val] of Object.entries(v)) { const el = $(`[name=${k}]`); if (el) el.value = val; } updateQuestion(); }
+function readForm(){ const o = {}; new FormData($('#form')).forEach((v,k)=>o[k]=String(v).trim()); return o; }
+function updateQuestion(lead){
+  const f = readForm();
+  $('#question').textContent = `Who joins ${lead || f.lead || 'your lead'} in ${f.company || 'your company'}'s ${f.stage} round?`;
+}
+$('#form').addEventListener('input', () => updateQuestion());
+$('#resetBtn').onclick = () => { fillForm(DEFAULT_CASE); $('#confirmBox').innerHTML=''; };
+
+/* ---------------------------------------------------------- mode */
+async function detectMode(){
+  try {
+    const r = await Promise.race([fetch('/api/health'), sleep(1500).then(()=>{throw 0})]);
+    const j = await r.json(); LIVE = !!(j.ok && j.cala);
+  } catch { LIVE = false; }
+  $('#mode').classList.toggle('live', LIVE);
+  $('#mode span').textContent = LIVE ? 'CALA LIVE' : 'DEMO · SAMPLE DATA';
+  $('#demoBanner').style.display = LIVE ? 'none' : 'block';
+}
+
+/* ---------------------------------------------------------- step 1: resolve + confirm */
+$('#form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = readForm(); $('#goBtn').disabled = true; $('#goBtn').innerHTML = '<span class="spin"></span> Matching in Cala…';
+  resetRun();
+  try {
+    const res = LIVE ? await (await fetch('/api/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)})).json()
+                     : await Demo.resolve(f);
+    (res.calls||[]).forEach(c => onEvent(c));
+    renderConfirm(f, res);
+  } catch(err){ $('#confirmBox').innerHTML = `<div class="flag-li red">Resolve failed: ${esc(err.message||err)}</div>`; }
+  $('#goBtn').disabled = false; $('#goBtn').textContent = '1 · Match entities in Cala';
+});
+
+function renderConfirm(f, res){
+  const comps = res.companies || [], leads = res.leads || [];
+  const det = res.detected ? `<div class="hint" style="margin:-2px 0 6px">Lead auto-detected from ${esc(res.detected.round.company)}'s latest round (${esc(res.detected.round.stage||'')} ${esc(res.detected.round.date||'')}).</div>` : '';
+  const opt = (name, list, fallback) => list.length ? list.map((e,i)=>`<label class="cand"><input type="radio" name="${name}" value="${i}" ${i===0?'checked':''}><span><b>${esc(e.name)}</b> <span class="mono" style="font-size:10px;color:var(--ink3)">${esc(e.entity_type||'')}</span><div>${esc(e.description||'')}</div></span></label>`).join('')
+                                   : `<div class="hint">${fallback}</div>`;
+  $('#confirmBox').innerHTML = `<div class="confirm"><h4>2 · Is this your company?</h4>${opt('pc', comps, 'No match in Cala; will use the name as typed.')}
+    <h4 style="margin-top:10px">Is this your lead?</h4>${det}${opt('pl', leads, f.lead ? 'No match; will use the name as typed.' : 'Could not detect a lead. Type it in the form.')}
+    <button class="btn primary" style="width:100%;margin-top:8px" id="runBtn" ${!leads.length && !f.lead ? 'disabled':''}>3 · Find co-investors</button></div>`;
+  $('#runBtn').onclick = () => {
+    const ci = +($('[name=pc]:checked')?.value ?? -1), li = +($('[name=pl]:checked')?.value ?? -1);
+    const sel = { company_id: comps[ci]?.id, company_name: comps[ci]?.name ? cleanName(comps[ci].name, f.company) : f.company,
+                  lead_id: leads[li]?.id, lead_name: leads[li]?.name || f.lead || res.detected?.lead };
+    updateQuestion(sel.lead_name); startRun(f, sel);
+  };
+}
+const cleanName = (n, typed) => n.length > 40 ? typed : n;
+
+/* ---------------------------------------------------------- step 2+: run */
+async function startRun(f, sel){
+  resetRun(true); $('#runBtn').disabled = true; $('#runBtn').innerHTML = '<span class="spin"></span> Agents running…';
+  switchTab('tr');
+  try {
+    if (LIVE) {
+      const resp = await fetch('/api/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({form:f, ...sel})});
+      const reader = resp.body.getReader(), dec = new TextDecoder(); let buf = '';
+      for(;;){ const {value, done} = await reader.read(); if (done) break; buf += dec.decode(value,{stream:true});
+        let i; while((i = buf.indexOf('\n\n')) >= 0){ const chunk = buf.slice(0,i); buf = buf.slice(i+2);
+          if (chunk.startsWith('data: ')) onEvent(JSON.parse(chunk.slice(6))); } }
+    } else await Demo.run(f, sel, onEvent);
+  } catch(err){ onEvent({type:'error', message: String(err.message||err)}); }
+  const b = $('#runBtn'); if (b){ b.disabled = false; b.textContent = 'Run again'; }
+}
+
+function resetRun(keepCalls){
+  state = { nodes:{}, edges:[], lanes:{lead:[],deal:[],investor:[],round:[]}, cands:{}, steps:[], calls: keepCalls ? (state.calls||[]) : [] , sel:null };
+  $('#canvas').querySelectorAll('.node,.lane-bg,.lane-h').forEach(n=>n.remove()); $('#edges').innerHTML='';
+  $('#empty').style.display='flex'; $('#insp').innerHTML = '<div class="insp-empty">Click any node to see<br>why it is there and the sources behind it.</div>';
+  renderTrace(); renderTables();
+  if(!keepCalls){ $('#headline').textContent='Nothing run yet'; $('#alloc').textContent='Appears after the run.'; }
+}
+
+/* ---------------------------------------------------------- event handling */
+function onEvent(ev){
+  switch(ev.type){
+    case 'step': { const s = state.steps.find(x=>x.id===ev.id); if (s) Object.assign(s, ev); else state.steps.push({...ev, calls:[]}); renderTrace(); break; }
+    case 'call': { state.calls.push(ev); const cur = [...state.steps].reverse().find(s=>s.status==='start'); (cur ? cur.calls : (state.pre ||= [])).push(ev); renderTrace(); break; }
+    case 'node': addNode(ev.node); break;
+    case 'edge': state.edges.push(ev.edge); layout(); break;
+    case 'result': onResult(ev); break;
+    case 'error': state.steps.push({id:'err', status:'error', label:'Error', detail: ev.message, calls:[]}); renderTrace(); break;
+  }
+}
+
+function addNode(n){
+  if (state.nodes[n.id]) return;
+  const lane = n.kind === 'competitor' ? 'deal' : n.kind;
+  state.nodes[n.id] = {...n, lane}; state.lanes[lane].push(n.id);
+  $('#empty').style.display='none';
+  const el = document.createElement('div'); el.className = `node ${n.kind}`; el.id = 'n-'+cssId(n.id);
+  el.innerHTML = nodeHTML(state.nodes[n.id]); el.onclick = () => select(n.id);
+  el.onmouseenter = () => hover(n.id); el.onmouseleave = () => hover(null);
+  $('#canvas').appendChild(el); layout();
+}
+const cssId = id => id.replace(/[^a-zA-Z0-9_-]/g,'_');
+const KIND = {lead:'Lead investor', deal:"Lead's deal", competitor:'Your competitor', investor:'Candidate', round:'Your round'};
+function nodeHTML(n){
+  const c = state.cands[n.id];
+  let h = `<div class="k">${KIND[n.kind]}</div><div class="t" style="${c?'padding-right:34px':''}">${esc(n.label)}</div><div class="s">${esc(c ? c.reason?.split(';')[0] : n.sub)}</div>`;
+  if (c){
+    h += `<span class="score">${c.score}</span><div class="bars">${['coinv','activity','stage','sector','follow','geo'].map(k=>`<span title="${k}"><b style="width:${Math.round((c.signals[k]?.v||0)*100)}%"></b></span>`).join('')}</div>`;
+    const f = c.flags.find(x=>x.severity!=='amber') || c.flags[0];
+    if (c.status==='flagged' && f) h += `<span class="badge ${f.severity}">${esc(f.kind)}</span>`;
+    else if (c.flags.length) h += `<span class="badge amber">${esc(c.flags[0].kind)}</span>`;
+  }
+  return h;
+}
+
+/* lanes: x positions are fractions of canvas width */
+const LANES = [['lead','Lead',0],['deal',"Lead's deals · 24 months",1],['investor','Candidate co-investors',2],['round','Your round',3]];
+function layout(){
+  const W = Math.max(910, $('#wrap').clientWidth), canvas = $('#canvas');
+  const gapX = (W - 32 - 196*3 - 170) / 3;
+  const order = id => { const c = state.cands[id]; return c ? (c.status==='short' ? -c.score : 1000 - c.score) : 0; };
+  let maxH = 0;
+  for (const [lane, title, fx] of LANES){
+    const ids = state.lanes[lane]; if (!ids.length) continue;
+    if (lane==='investor' && state.done) ids.sort((a,b)=>order(a)-order(b));
+    if (lane==='deal') ids.sort((a,b)=>(state.nodes[a].kind==='competitor')-(state.nodes[b].kind==='competitor'));
+    const x = Math.round(16 + fx*(196 + gapX));
+    let hEl = canvas.querySelector(`.lane-h[data-l="${lane}"]`);
+    if (!hEl){ hEl = document.createElement('div'); hEl.className='lane-h cap'; hEl.dataset.l=lane; hEl.textContent=title; canvas.appendChild(hEl);
+      const bg = document.createElement('div'); bg.className='lane-bg'; bg.dataset.l=lane; canvas.prepend(bg); }
+    hEl.style.left = x+'px';
+    const bg = canvas.querySelector(`.lane-bg[data-l="${lane}"]`); bg.style.left=(x-8)+'px'; bg.style.width=(lane==='round'?186:212)+'px';
+    const gap = lane==='investor' ? 74 : 70;
+    const offset = (lane==='lead'||lane==='round') ? Math.max(0, (state.lanes.investor.length*74 - 60)/2) : 0;
+    ids.forEach((id,i)=>{ const el = $('#n-'+cssId(id)); const n = state.nodes[id];
+      n.x = x; n.y = 40 + offset + i*gap; el.style.left = n.x+'px'; el.style.top = n.y+'px'; maxH = Math.max(maxH, n.y+80); });
+  }
+  canvas.style.height = Math.max(maxH+70, $('#wrap').clientHeight)+'px'; canvas.style.width = W+'px';
+  canvas.querySelectorAll('.lane-bg').forEach(b=>{ b.style.top='4px'; b.style.height=(Math.max(maxH+20, $('#wrap').clientHeight-20))+'px'; });
+  drawEdges();
+}
+function drawEdges(){
+  const w = {}; state.edges.forEach(e=>{ if(e.kind==='deal-inv') w[e.to]=(w[e.to]||0)+1; });
+  $('#edges').innerHTML = state.edges.map(e=>{
+    const a = state.nodes[e.from], b = state.nodes[e.to]; if (!a||!b||a.x==null||b.x==null) return '';
+    const ah = a.kind==='round'?40:27, bh = b.kind==='round'?40:27;
+    let x1 = a.x + (a.kind==='round'?170:196), y1 = a.y+ah, x2 = b.x, y2 = b.y+bh;
+    if (e.kind==='conflict'){ x1 = a.x; x2 = b.x+196; }
+    const dx = Math.abs(x2-x1)*.45, d = e.kind==='conflict' ? `M${x1} ${y1} C${x1-dx} ${y1} ${x2+dx} ${y2} ${x2} ${y2}` : `M${x1} ${y1} C${x1+dx} ${y1} ${x2-dx} ${y2} ${x2} ${y2}`;
+    const on = state.hover && (e.from===state.hover || e.to===state.hover);
+    const st = { 'lead-deal':['#818cf8',1.4,''], 'deal-inv':['#94a3b8',1.1,''], 'inv-round':['#059669',1.4,'5 4'], 'conflict':['#dc2626',1.6,'4 3'] }[e.kind] || ['#94a3b8',1,''];
+    const sw = e.kind==='deal-inv' ? 1 + (w[e.to]||1)*0.5 : st[1];
+    const dim = state.hover && !on ? .12 : (e.kind==='deal-inv' && state.done && state.cands[e.to]?.status==='flagged' && !state.cands[e.to].flags.some(f=>f.severity==='red') ? .25 : .85);
+    return `<path d="${d}" fill="none" stroke="${on? '#4f46e5' : st[0]}" stroke-width="${on? sw+0.8 : sw}" stroke-dasharray="${st[2]}" opacity="${dim}"/>`;
+  }).join('');
+}
+function hover(id){
+  state.hover = id; drawEdges();
+  if (!id){ $$('.node').forEach(n=>n.classList.remove('dim')); return; }
+  const linked = new Set([id]); state.edges.forEach(e=>{ if(e.from===id) linked.add(e.to); if(e.to===id) linked.add(e.from); });
+  Object.keys(state.nodes).forEach(k=>$('#n-'+cssId(k))?.classList.toggle('dim', !linked.has(k)));
+}
+window.addEventListener('resize', () => layout());
+
+/* ---------------------------------------------------------- results */
+function onResult(ev){
+  state.done = true; state.summary = ev.summary; state.alloc = ev.allocation;
+  ev.candidates.forEach(c => { state.cands[c.id] = c; addNode({id:c.id, kind:'investor', label:c.name, sub:''}); });
+  for (const c of ev.candidates){ const el = $('#n-'+cssId(c.id)); if(!el) continue;
+    el.className = `node investor ${c.status} ${c.flags.some(f=>f.severity==='red')?'red':''}`; el.innerHTML = nodeHTML(state.nodes[c.id]); }
+  // investors scanned but not returned (e.g. capped) are dimmed
+  state.lanes.investor.forEach(id=>{ if(!state.cands[id]) $('#n-'+cssId(id))?.classList.add('flagged'); });
+  layout(); renderTables(); renderOverview(); switchTab('ov');
+  const top = ev.candidates.find(c=>c.status==='short'); if (top) select(top.id);
+}
+function renderOverview(){
+  const s = state.summary, short = Object.values(state.cands).filter(c=>c.status==='short'), fl = Object.values(state.cands).filter(c=>c.status==='flagged');
+  const red = fl.filter(c=>c.flags.some(f=>f.severity==='red'));
+  $('#headline').textContent = `${short.length} strong fits, ${fl.length} to skip — ${eur(s.open_eur)} still open`;
+  const top = short[0];
+  $('#bullets').innerHTML = [
+    top && `<b>${esc(top.name)}</b> is the best fit: ${esc(top.reason)}.`,
+    `${s.scanned} investors scanned from ${esc(s.lead)}'s co-investment graph and recent ${esc(readForm().stage)} rounds in your sector.`,
+    red.length ? `<span style="color:var(--red)">Do not pitch ${red.map(c=>esc(c.name)).join(', ')}</span>: backed a competitor (${red.map(c=>esc(c.flags.find(f=>f.kind==='conflict').company)).join(', ')}).` : 'No investor-competitor conflicts found.',
+    fl.length - red.length ? `${fl.length - red.length} investors look inactive, lead-only or at the wrong stage.` : ''
+  ].filter(Boolean).map(x=>`<li>${x}</li>`).join('');
+  const tot = s.open_eur || 1;
+  $('#alloc').style.color='var(--ink)'; $('#alloc').innerHTML = (state.alloc||[]).map(a=>`<div class="alloc-row ${a.id?'':'open'}"><span>${esc(a.name)}</span><span class="tr"><b style="width:${Math.min(100,a.eur/tot*100)}%"></b></span><span class="mono" style="text-align:right">${eur(a.eur)}</span></div>`).join('')
+    + `<div class="hint" style="margin-top:6px">Based on each investor's typical ticket in Cala (round size ÷ number of investors).</div>`;
+}
+function renderTables(){
+  const all = Object.values(state.cands), short = all.filter(c=>c.status==='short').sort((a,b)=>b.score-a.score), fl = all.filter(c=>c.status==='flagged');
+  $('#nS').textContent = short.length; $('#nF').textContent = fl.length;
+  $('#slBody').innerHTML = short.map((c,i)=>`<tr class="click" onclick="select('${c.id}')"><td>${i+1}</td><td><b>${esc(c.name)}</b>${c.flags.length?` <span class="badge amber">${esc(c.flags[0].kind)}</span>`:''}</td><td><span class="sbar"><b style="width:${c.score}%"></b></span>${c.score}</td><td>${esc(c.reason)}</td><td>${c.rounds_12m ?? '?'} rounds / 12 mo</td><td>${eur(c.ticket)}</td></tr>`).join('') || '<tr><td colspan=6 style="color:var(--ink3)">No results yet.</td></tr>';
+  $('#flBody').innerHTML = fl.map(c=>c.flags.filter(f=>f.severity!=='amber').map((f,j)=>`<tr class="click" onclick="select('${c.id}')"><td>${j?'':`<b>${esc(c.name)}</b>`}</td><td><span class="badge ${f.severity}">${esc(f.kind)}</span></td><td>${esc(f.reason)}</td></tr>`).join('')).join('') || '<tr><td colspan=3 style="color:var(--ink3)">No flags yet.</td></tr>';
+}
+function renderTrace(){
+  $('#nC').textContent = state.calls?.length || 0;
+  const callHTML = c => `<div class="trace-call"><b>${esc(c.endpoint)}</b>  ${esc(c.input)}  <span style="color:var(--ink3)">· ${c.cached?'cached':c.ms+'ms'}${c.n!=null?` · ${c.n} results`:''}${c.error?' · '+esc(c.error):''}</span></div>`;
+  const pre = (state.pre||[]).length ? `<div class="trace-step"><span class="st done">DONE</span>1 Resolver <em>— matched entities</em></div>${state.pre.map(callHTML).join('')}` : '';
+  const body = state.steps.map(s=>`<div class="trace-step"><span class="st ${s.status==='done'?'done':s.status==='start'?'run':''}">${s.status==='done'?'DONE':s.status==='start'?'RUN':'ERR'}</span>${esc(s.label)} <em>— ${esc(s.detail||'')}</em></div>${(s.calls||[]).map(callHTML).join('')}`).join('');
+  $('#trace').innerHTML = (pre + body) || 'The agent trace streams here: each step and every Cala API call.';
+  const p = $('#p-tr'); p.scrollTop = p.scrollHeight;
+}
+
+/* ---------------------------------------------------------- inspector */
+const SIG = {coinv:'With lead', activity:'Activity', stage:'Stage fit', sector:'Sector fit', follow:'Follows', geo:'Geography'};
+function select(id){
+  $$('.node').forEach(n=>n.classList.remove('sel')); $('#n-'+cssId(id))?.classList.add('sel');
+  const n = state.nodes[id], c = state.cands[id], I = $('#insp');
+  if (!n) return;
+  if (!c){
+    const links = state.edges.filter(e=>e.from===id||e.to===id).map(e=>state.nodes[e.from===id?e.to:e.from]).filter(Boolean);
+    I.innerHTML = `<div class="cap" style="margin-top:12px">${KIND[n.kind]}</div><h2>${esc(n.label)}</h2><div style="color:var(--ink2)">${esc(n.sub||'')}</div>
+      <h5>Connected in the graph (${links.length})</h5>${links.map(l=>`<div class="deal-li" style="cursor:pointer" onclick="select('${l.id}')">${esc(l.label)}<span>${KIND[l.kind]}</span></div>`).join('')||'<div class="hint">None yet.</div>'}`;
+    return;
+  }
+  const tags = [c.origin==='sector'?'sector-active':"in lead's network", c.lead_ratio!=null?`leads ${Math.round(c.lead_ratio*100)}%`:null, c.last_date?`last round ${c.last_date}`:null, c.ticket?`ticket ~${eur(c.ticket)}`:'ticket unknown'].filter(Boolean);
+  I.innerHTML = `<div class="cap" style="margin-top:12px">${c.status==='short'?'Shortlisted':'Flagged'} · candidate co-investor</div>
+    <span class="big">${c.score}</span><h2>${esc(c.name)}</h2>
+    <div class="tags">${tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>
+    <div class="reason">${esc(c.reason)}</div>
+    ${c.flags.length?`<h5>Flags</h5>${c.flags.map(f=>`<div class="flag-li ${f.severity}"><b>${esc(f.kind)}</b> — ${esc(f.reason)}</div>`).join('')}`:''}
+    <h5>Signals (score ${c.score}/100)</h5>${Object.keys(SIG).map(k=>{const s=c.signals[k]||{}; return `<div class="sig"><span>${SIG[k]}</span>${s.v==null?`<span class="na">${esc(s.label||'unknown')}</span><span></span>`:`<span class="tr" title="${esc(s.label)}"><b style="width:${Math.round(s.v*100)}%"></b></span><span class="mono" style="font-size:10.5px">${Math.round(s.v*100)}%</span>`}</div>`}).join('')}
+    <h5>Shared deals with ${esc(state.summary?.lead||'lead')} (${c.shared.length})</h5>${c.shared.map(d=>`<div class="deal-li">${esc(d.company)}<span>${esc([d.stage,d.date].filter(Boolean).join(' · '))}</span></div>`).join('')||'<div class="hint">None. Found via recent rounds in your sector.</div>'}
+    <h5>Recent rounds in Cala (${(c.rounds||[]).length})</h5>${(c.rounds||[]).slice(0,6).map(r=>`<div class="deal-li">${esc(r.company)}<span>${esc([r.stage,r.date].filter(Boolean).join(' · '))}${r.lead?' · led':''}</span></div>`).join('')}
+    <h5>Sources</h5><div class="src">${(c.sources||[]).map(s=>`<a href="${esc(s.url)}" target="_blank" rel="noopener">↗ ${esc(s.name)}</a>`).join('') || '<span class="hint">Facts above come from Cala knowledge_query rows; source URLs are attached for the top picks.</span>'}</div>
+    ${c.intro?`<h5>Intro request to your lead</h5><div class="intro" id="introTxt">${esc(c.intro)}</div><button class="btn" style="margin-top:6px" onclick="copyIntro(this)">Copy</button>`:''}`;
+}
+async function copyIntro(b){ try { await navigator.clipboard.writeText($('#introTxt').textContent); b.textContent='Copied'; } catch { b.textContent='Select the text to copy'; } }
+
+/* ---------------------------------------------------------- tabs & modal */
+function switchTab(p){ $$('.tab[data-p]').forEach(t=>t.classList.toggle('on', t.dataset.p===p)); $$('.pane').forEach(x=>x.classList.toggle('on', x.id==='p-'+p)); $('#bottom').classList.remove('min'); }
+$$('.tab[data-p]').forEach(t => t.onclick = () => switchTab(t.dataset.p));
+$('#minBtn').onclick = () => { $('#bottom').classList.toggle('min'); setTimeout(layout, 250); };
+$('#archBtn').onclick = () => $('#arch').classList.add('on'); $('#archClose').onclick = () => $('#arch').classList.remove('on');
+$('#arch').onclick = e => { if (e.target.id==='arch') $('#arch').classList.remove('on'); };
+
+/* =====================================================================
+   Scoring — mirror of backend/scoring.py (demo mode only)
+   ===================================================================== */
+const W8 = {coinv:35, activity:20, stage:15, sector:15, follow:10, geo:5};
+const stageKey = s => { s = String(s||'').toLowerCase(); if (s.includes('pre') && s.includes('seed')) return 'pre-seed'; if (s.includes('seed')) return 'seed'; const m = s.match(/series ([a-g])/); return m ? 'series-'+m[1] : s; };
+const days = d => (Date.now() - Date.parse(d)) / 864e5;
+function scoreCandidate(c, ctx){
+  const R = c.rounds, n = R.length, sig = {};
+  const recent = c.shared.filter(d => days(d.date) < 730).length;
+  sig.coinv = {v: c.shared.length ? Math.min(1, (c.shared.length + .5*recent)/3) : 0, label: `${c.shared.length} shared deals with lead`};
+  const dated = R.filter(r=>r.date); const r12 = dated.filter(r=>days(r.date)<=365).length;
+  c.rounds_12m = dated.length ? r12 : null; c.last_date = dated.length ? dated.map(r=>r.date).sort().pop() : null;
+  sig.activity = dated.length ? {v: Math.min(1, r12/4), label: `${r12} rounds in 12 months`} : {v:null, label:'activity unknown'};
+  if (n){
+    const st = R.filter(r=>stageKey(r.stage)===stageKey(ctx.stage)).length/n; sig.stage = {v:st, label:`${Math.round(st*100)}% at ${ctx.stage}`};
+    const sec = R.filter(r=>ctx.sector_terms.some(t=>String(r.sector||'').toLowerCase().includes(t))).length/n; sig.sector = {v:sec, label:`${Math.round(sec*100)}% in your sector`};
+    const kl = R.filter(r=>r.lead!=null); if (kl.length){ c.lead_ratio = kl.filter(r=>r.lead).length/kl.length; sig.follow = {v:1-c.lead_ratio, label:`follows in ${Math.round((1-c.lead_ratio)*100)}%`}; } else sig.follow = {v:null,label:'unknown'};
+    if (ctx.country){ const g = R.some(r=>String(r.country||'').toLowerCase().includes(ctx.country.toLowerCase())); sig.geo = {v:g?1:0, label:`${g?'has':'no'} deals in ${ctx.country}`}; }
+    const t = R.filter(r=>r.amount).map(r=>r.amount/Math.max(1,r.investors.length)).sort((a,b)=>a-b); c.ticket = t.length ? t[Math.floor(t.length/2)] : null;
+  }
+  c.signals = sig; c.score = Math.round(Object.keys(W8).reduce((s,k)=>s + W8[k]*(sig[k]?.v||0), 0));
+  const f = [], comp = ctx.competitors.map(x=>x.toLowerCase());
+  const hit = R.find(r=>comp.includes(String(r.company).toLowerCase()));
+  if (hit) f.push({kind:'conflict', severity:'red', reason:`Backed competitor ${hit.company} (${hit.stage}, ${hit.date})`, company: hit.company});
+  if (c.last_date && days(c.last_date) > 365) f.push({kind:'inactive', severity:'grey', reason:`No round found since ${c.last_date}`});
+  if (c.lead_ratio!=null && n>=3 && c.lead_ratio>.8) f.push({kind:'lead-only', severity:'grey', reason:`Leads ${Math.round(c.lead_ratio*100)}% of its rounds`});
+  if (sig.stage && n>=3 && sig.stage.v < .1) f.push({kind:'stage', severity:'grey', reason:`Rarely invests at ${ctx.stage}`});
+  if (c.ticket && ctx.open_eur && c.ticket > ctx.open_eur) f.push({kind:'ticket', severity:'amber', reason:`Typical ticket ~${eur(c.ticket)} exceeds the open ${eur(ctx.open_eur)}`});
+  c.flags = f; c.status = f.some(x=>x.severity!=='amber') ? 'flagged' : 'short';
+  const bits = []; if (c.shared.length) bits.push(`Co-invested with ${ctx.lead} in ${c.shared.slice(0,2).map(d=>d.company).join(', ')}${c.shared.length>2?` and ${c.shared.length-2} more`:''}`); else bits.push('Active in your sector and stage');
+  if (c.rounds_12m) bits.push(`${c.rounds_12m} rounds in the last 12 months`); if (c.lead_ratio!=null) bits.push(`follows in ${Math.round((1-c.lead_ratio)*100)}% of deals`);
+  c.reason = bits.join('; ');
+  return c;
+}
+
+/* =====================================================================
+   Demo backend — FICTIONAL sample investors and deals (not real data).
+   It replays the same events the live backend sends.
+   ===================================================================== */
+const Demo = (() => {
+  const L = 'Northwind Capital';
+  const R = (company, stage, date, m, leads, investors, sector, country) => ({company, stage, date, amount: m*1e6, leads, investors, sector, country});
+  const LEAD_ROUNDS = [
+    R('Cortexa','Seed','2026-05-07',4.0,[L],[L,'Basalt Ventures','Lumen Partners','Atlas Corporate Ventures'],'AI infrastructure','France'),
+    R('Vectorly','Pre-seed','2026-02-20',1.1,[L],[L,'Harbor Seed','Fjord Angels'],'Developer tools','Spain'),
+    R('Agentbase','Series A','2025-09-18',11,['Meridian Growth'],['Meridian Growth',L,'Basalt Ventures','Kestrel VC'],'AI agents','Germany'),
+    R('GraphLoom','Seed','2025-03-12',3.0,[L],[L,'Basalt Ventures','Lumen Partners','Ridgeline VC'],'AI infrastructure','Spain'),
+    R('Datapier','Seed','2024-12-04',2.2,[L],[L,'Harbor Seed','Fjord Angels','Orbit Fund'],'Data infrastructure','Finland'),
+  ];
+  const SECTOR_ROUNDS = [
+    R('Synthra','Seed','2026-06-05',12,['Quarry Capital'],['Quarry Capital','Tidewater Ventures','Ember Seed'],'AI infrastructure','Spain'),
+    R('Promptwell','Seed','2025-11-20',2.5,['Tidewater Ventures'],['Tidewater Ventures','Ember Seed'],'AI infrastructure','Portugal'),
+  ];
+  const x = (company, stage, date, m, led, k, sector, country) => R(company, stage, date, m, led?['$me']:['Other'], Array(k).fill('x'), sector, country);
+  const EXTRA = {
+    'Basalt Ventures':[x('Nimbl','Seed','2026-08-02',3.5,0,4,'AI infrastructure','Spain'),x('Orchestr','Seed','2026-01-15',2.8,0,3,'Developer tools','Netherlands'),x('Kernelly','Seed','2025-12-01',3,1,3,'AI infrastructure','Spain')],
+    'Harbor Seed':[x('Loopwise','Seed','2026-07-10',2,0,4,'Data infrastructure','Finland'),x('Tracebit','Pre-seed','2026-03-03',1,0,3,'AI agents','Sweden'),x('Ledgerly','Seed','2025-06-01',2.5,0,5,'Fintech','Spain')],
+    'Lumen Partners':[x('Sparrow AI','Series A','2026-04-22',9,1,3,'AI infrastructure','France')],
+    'Fjord Angels':[x('Mosscode','Pre-seed','2026-09-01',.8,0,5,'Developer tools','Norway'),x('Pellet','Seed','2026-06-11',1.5,0,6,'AI agents','Finland'),x('Quillr','Pre-seed','2026-02-02',.6,0,4,'SaaS','Denmark'),x('Tundra Labs','Seed','2025-12-20',2,0,6,'AI infrastructure','Finland')],
+    'Ridgeline VC':[x('Brightvane','Seed','2026-03-15',3,0,4,'Climate','Germany')],
+    'Kestrel VC':[x('Gridmind','Seed','2026-04-08',3.2,1,3,'AI infrastructure','Spain'),x('Fennec','Seed','2025-10-10',2,0,4,'AI agents','UK')],
+    'Atlas Corporate Ventures':[x('Optiq','Series A','2025-08-01',8,0,5,'AI infrastructure','France')],
+    'Meridian Growth':[x('Halcyon','Series B','2025-07-01',30,1,3,'SaaS','UK'),x('Corvid','Series B','2025-05-01',25,1,2,'Fintech','Germany'),x('Aperture','Series C','2025-02-01',50,1,4,'SaaS','US')],
+    'Orbit Fund':[x('Stackfold','Seed','2025-03-01',2,0,4,'Data infrastructure','Finland')],
+    'Quarry Capital':[x('Helixa','Series A','2026-02-01',20,1,3,'AI infrastructure','UK'),x('Corewave','Seed','2025-11-11',9,1,2,'AI infrastructure','Germany')],
+    'Tidewater Ventures':[x('Datadune','Seed','2026-09-20',3,0,4,'Data infrastructure','Spain')],
+    'Ember Seed':[x('Inkling','Pre-seed','2026-01-10',1,0,4,'AI agents','Portugal')],
+  };
+  const COMPETITORS = ['Gridmind'];
+  const SOURCES = [{name:'Sample source (demo) — live mode shows Cala origins', url:'https://docs.cala.ai/api-reference/search'}];
+  const profileRounds = name => [...LEAD_ROUNDS, ...SECTOR_ROUNDS].filter(r=>r.investors.includes(name))
+      .map(r=>({...r, lead: r.leads.includes(name)}))
+      .concat((EXTRA[name]||[]).map(r=>({...r, lead: r.leads[0]==='$me'})))
+      .sort((a,b)=>b.date.localeCompare(a.date));
+
+  let emit; const call = async (endpoint, input, n, ms=180+Math.random()*420) => { await sleep(ms*0.6); await emit({type:'call', endpoint, input, ms:Math.round(ms), n}); };
+
+  async function resolve(f){
+    const calls = []; emit = async e => calls.push(e);
+    await call('GET /v1/entities', f.company, 5);
+    const isCala = /^cala/i.test(f.company);
+    const companies = isCala ? [
+      {name:'Cala AI', entity_type:'Company', description:'Verified knowledge graph for AI agents: structured, sourced data via API and MCP.'},
+      {name:'Cala', entity_type:'Company', description:'Paris-based robotic pasta restaurant platform.'},
+      {name:'Cala Health', entity_type:'Company', description:'Medical technology company.'},
+      {name:'CALA', entity_type:'Company', description:'Design and production platform for fashion brands.'},
+      {name:'Cala Systems', entity_type:'Company', description:'Heat-pump water heaters with on-device forecasting.'}]
+      : [{name:f.company, entity_type:'Company', description:'(demo) matched as typed'}];
+    let detected = null;
+    if (!f.lead){ await call('POST /v1/knowledge/query', `funding_rounds.company=${f.company}.order_by=date DESC.limit=3.return(company, round_type, date, lead_investor, investors)`, 1);
+      detected = {lead: L, round:{company:f.company, stage:'Seed', date:'2026 (sample)'}}; }
+    await call('GET /v1/entities', f.lead || L, 1);
+    const leads = [{name: f.lead || L, entity_type:'Organization', description: f.lead ? '(demo) matched as typed' : 'Fictional sample VC used in demo mode.'}];
+    return {companies, leads, detected, calls};
+  }
+
+  async function run(f, sel, out){
+    emit = out; const lead = sel.lead_name || L, company = sel.company_name || f.company;
+    const open = Math.max(0, (+f.target||0) - (+f.committed||0));
+    const ctx = {stage:f.stage, sector_terms: f.sector.toLowerCase().split(/[,;/]/).map(s=>s.trim()).filter(s=>s.length>2), country:f.country, open_eur:open,
+                 competitors: f.competitors ? f.competitors.split(',').map(s=>s.trim()) : COMPETITORS, lead};
+    await emit({type:'node', node:{id:'lead', kind:'lead', label:lead, sub:'your lead investor'}});
+    await emit({type:'node', node:{id:'round', kind:'round', label:company, sub:`${f.stage} · ${eur(open)} open`}});
+    await emit({type:'step', id:'explore', status:'start', label:'Graph Explorer', detail:`Walking ${lead}'s past rounds to find who joined them`});
+    await call('POST /v1/knowledge/query', `funding_rounds.investors=${lead}.date>=2024-11-01.order_by=date DESC.limit=40.return(company, round_type, date, amount, lead_investor, investors, industry, country)`, LEAD_ROUNDS.length, 900);
+    const cands = {};
+    for (const r of LEAD_ROUNDS){
+      const did = 'deal:'+slug(r.company); await sleep(260);
+      await emit({type:'node', node:{id:did, kind:'deal', label:r.company, sub:`${r.stage} · ${r.date}`}});
+      await emit({type:'edge', edge:{from:'lead', to:did, kind:'lead-deal'}});
+      for (const inv of r.investors){ if (inv===L) continue; const id = 'inv:'+slug(inv);
+        if (!cands[id]){ cands[id] = {id, name:inv, shared:[], origin:'lead-graph'}; await sleep(140); await emit({type:'node', node:{id, kind:'investor', label:inv, sub:'in lead\'s network'}}); }
+        cands[id].shared.push({company:r.company, stage:r.stage, date:r.date});
+        await emit({type:'edge', edge:{from:did, to:id, kind:'deal-inv'}}); }
+    }
+    await emit({type:'step', id:'explore', status:'done', label:'Graph Explorer', detail:`${LEAD_ROUNDS.length} lead rounds, ${Object.keys(cands).length} co-investors`});
+    await emit({type:'step', id:'sector', status:'start', label:'Sector Scout', detail:`Recent ${f.stage} rounds in ${f.sector}`});
+    await call('POST /v1/knowledge/query', `funding_rounds.company.industry=${ctx.sector_terms[0]}.round_type=${f.stage}.date>=2024-11-01.order_by=date DESC.limit=40`, SECTOR_ROUNDS.length, 800);
+    let added = 0;
+    for (const r of SECTOR_ROUNDS) for (const inv of r.investors){ const id='inv:'+slug(inv); if (cands[id]) continue;
+      cands[id] = {id, name:inv, shared:[], origin:'sector'}; added++; await sleep(160); await emit({type:'node', node:{id, kind:'investor', label:inv, sub:'sector-active'}}); }
+    await call('POST /v1/knowledge/query', `companies.competitors_of=${company}.limit=10.return(name)`, ctx.competitors.length);
+    await emit({type:'step', id:'sector', status:'done', label:'Sector Scout', detail:`${SECTOR_ROUNDS.length} sector rounds, ${added} new candidates; competitors: ${ctx.competitors.join(', ')}`});
+    const list = Object.values(cands);
+    await emit({type:'step', id:'profile', status:'start', label:'Profiler', detail:`Pulling the last 24 months of rounds for ${list.length} investors`});
+    for (const c of list){ c.rounds = profileRounds(c.name); await call('POST /v1/knowledge/query', `funding_rounds.investors=${c.name}.date>=2024-11-01.order_by=date DESC.limit=30`, c.rounds.length, 250); }
+    await emit({type:'step', id:'profile', status:'done', label:'Profiler', detail:`${list.reduce((s,c)=>s+c.rounds.length,0)} rounds profiled`});
+    await emit({type:'step', id:'score', status:'start', label:'Scorer', detail:'Scoring 6 signals, applying 5 flag rules'}); await sleep(500);
+    list.forEach(c => scoreCandidate(c, ctx));
+    for (const c of list){ for (const fl of c.flags) if (fl.kind==='conflict'){ const cid='comp:'+slug(fl.company);
+        await emit({type:'node', node:{id:cid, kind:'competitor', label:fl.company, sub:'your competitor'}}); await emit({type:'edge', edge:{from:c.id, to:cid, kind:'conflict'}}); }
+      if (c.status==='short') await emit({type:'edge', edge:{from:c.id, to:'round', kind:'inv-round'}}); }
+    list.sort((a,b)=>b.score-a.score);
+    const short = list.filter(c=>c.status==='short'), flagged = list.filter(c=>c.status==='flagged');
+    await emit({type:'step', id:'score', status:'done', label:'Scorer', detail:`${short.length} shortlisted, ${flagged.length} flagged`});
+    await emit({type:'step', id:'write', status:'start', label:'Writer', detail:'Attaching sources to the top picks'});
+    for (const c of [...short.slice(0,5), ...flagged.filter(c=>c.flags.some(x=>x.kind==='conflict'))]){
+      await call('POST /v1/knowledge/search', `Who invested in ${c.shared[0]?.company || c.rounds[0]?.company}'s ${c.shared[0]?.stage || ''} round?`, 3, 600); c.sources = SOURCES; }
+    short.forEach(c => c.intro = `Hi — as we fill the rest of ${company}'s ${f.stage.toLowerCase()} round, could you introduce me to ${c.name}? ${c.shared.length?`You co-invested with them in ${c.shared.slice(0,2).map(d=>d.company).join(' and ')}, so a note from you would carry weight.`:'They have been active in our space recently.'} Happy to send a forwardable blurb. Thanks, ${f.founder||'the founder'}`);
+    await emit({type:'step', id:'write', status:'done', label:'Writer', detail:'Reasons and intro drafts ready'});
+    let left = open; const alloc = [];
+    for (const c of short){ if (left<=0) break; if (!c.ticket) continue; const t = Math.min(c.ticket, left); alloc.push({id:c.id, name:c.name, eur:t}); left -= t; }
+    if (left>0) alloc.push({id:null, name:'Still open', eur:left});
+    await emit({type:'result', candidates:[...short, ...flagged], summary:{open_eur:open, scanned:list.length, shortlisted:short.length, flagged:flagged.length, lead, company, competitors:ctx.competitors}, allocation:alloc});
+  }
+  return {resolve, run};
+})();
+
+/* ---------------------------------------------------------- boot */
+fillForm(DEFAULT_CASE); detectMode();
+</script>
+</body>
+</html>
