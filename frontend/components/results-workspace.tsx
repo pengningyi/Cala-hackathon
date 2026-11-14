@@ -6,6 +6,8 @@ import type { CandidateCard, RunResult, Source } from "../lib/types";
 import AgentInsights from "./agent-insights";
 import ResultsGraph from "./results-graph";
 import AllocationSummary, { InvestorAllocation } from "./allocation-panel";
+import { ACTION_LABELS, ORIGIN_LABELS } from "../lib/trust-labels";
+import { RankingGuide } from "./score-explainer";
 
 interface Props {
   result: RunResult;
@@ -63,6 +65,7 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
   const detailIndex = result.candidates.findIndex(card => card.investor.id === detailsId);
   const detailCard = result.candidates[detailIndex];
   const count = result.candidates.length;
+  const rules = result.scoring_version.startsWith("rules-");
   const provisional = result.profile.round.lead_status === "conditional" || result.profile.round.lead_status === "unconfirmed";
   const eligibleCount = result.candidates.filter(card => card.review_status !== "flagged").length;
   const displayError = error || (result.error && String(result.error.message || "Search unavailable"));
@@ -80,7 +83,7 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
     <div className="results-top workspace-top"><button className="back-link" onClick={onEdit}><ArrowLeft size={14} />Adjust your round</button>
       <div className="workspace-top-actions">{result.combined_draft && <CopyRequest text={result.combined_draft} label={`Copy ${Math.min(3, eligibleCount)}-investor request`} />}
         <button type="button" className="button text-button" disabled={busy} onClick={onRerun}><RotateCcw size={13} />Rerun search</button></div></div>
-    <div className="hero workspace-hero"><div><div className="eyebrow">{result.state === "partial" ? "Partial results · available evidence" : "Your lead-connected workspace"}</div>
+    <div className="hero workspace-hero"><div><div className="eyebrow">{result.state === "partial" ? "Partial results · available evidence" : "Your introduction workspace"}</div>
       <h1>{heading}</h1><p>{result.lead ? `Connected through ${result.lead.name} · ${result.lookback_months}-month lookback` : "No co-investor search was needed."}{result.profile.round.lead_status === "unconfirmed" ? " · Current-round commitment unconfirmed" : provisional && " · Provisional lead"}</p></div></div>
     <div className="summary-strip workspace-summary"><div><span>Remaining allocation</span><strong>{money(result.remaining_allocation_eur)}</strong></div>
       <div><span>Firm commitments</span><strong>{money(result.profile.round.firm_commitments_eur)}</strong></div>
@@ -92,19 +95,24 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
 
     <div className="result-workspace">
       <section className="workspace-shortlist" aria-labelledby="workspace-shortlist-heading">
-        <div className="shortlist-heading workspace-panel-heading"><div><h2 id="workspace-shortlist-heading">Your top investors</h2><p>Scores and estimated allocation · {money(result.remaining_allocation_eur)} open</p></div><span className="workspace-count mono">{count} / 5</span></div>
+        <div className="shortlist-heading workspace-panel-heading"><div><h2 id="workspace-shortlist-heading">Your top investors</h2><p>{rules ? "Rules met" : "Scores"} and estimated allocation · {money(result.remaining_allocation_eur)} open</p></div><span className="workspace-count mono">{count} / 5</span></div>
+        <RankingGuide result={result} />
         <div className="workspace-investor-list">{result.candidates.map((card, index) => <div key={card.investor.id} className={`workspace-investor-row ${selectedInvestorId === card.investor.id ? "is-selected" : ""}`}>
           <button type="button" className="workspace-investor-select" aria-label={`Select ${card.investor.name}`} aria-pressed={selectedInvestorId === card.investor.id} onClick={() => setSelectedInvestorId(card.investor.id)}>
             <span className="workspace-rank mono">{String(index + 1).padStart(2, "0")}</span><span className="workspace-investor-name"><strong title={card.investor.name}>{card.investor.name}</strong>{card.review_status === "flagged" && <span className="workspace-review-status">Needs review</span>}
-              <small>{card.shared_round_count} shared {card.shared_round_count === 1 ? "round" : "rounds"} · {Math.round(card.profile_completeness * 100)}% complete{card.action === "follow_up" ? " · Follow-up" : ""}</small></span>
-            <span className="workspace-investor-score" title="Introduction priority, not an investment probability">{card.fit_score}<small>/100</small></span></button>
+              {(card.origins || []).filter(origin => origin !== "lead_network").map(origin => <span key={origin} className={`workspace-origin-chip origin-${origin}`}>{ORIGIN_LABELS[origin]}</span>)}
+              <small>{card.shared_round_count} shared {card.shared_round_count === 1 ? "round" : "rounds"}{rules ? "" : ` · ${Math.round(card.profile_completeness * 100)}% complete`}{card.action === "follow_up" ? " · Follow-up" : ""}</small>
+              {card.recommended_action && <span className={`workspace-action-chip action-${card.recommended_action}`} title={card.trust == null ? "Trust unknown: no people data" : `Trust ${card.trust.toFixed(2)} from public professional roles`}>
+                {ACTION_LABELS[card.recommended_action]}{card.action_contact ? ` · ${card.action_contact.name}` : ""}{card.trust != null ? ` · trust ${card.trust.toFixed(2)}` : ""}</span>}</span>
+            {rules ? <span className="workspace-investor-score workspace-rules-score" title="Number of ranking rules this investor meets">{card.fit_score}<small>{card.fit_score === 1 ? "rule met" : "rules met"}</small></span>
+              : <span className="workspace-investor-score" title="Introduction priority, not an investment probability">{card.fit_score}<small>/100</small></span>}</button>
           <CopyRequest text={card.draft} label={`Copy request for ${card.investor.name}`} compact />
           <button type="button" className="button workspace-icon-button" aria-label={`View details for ${card.investor.name}`} title="Evidence, fit & draft" onClick={() => showDetails(card.investor.id)}><ChevronRight size={17} /></button>
           <InvestorAllocation card={card} allocation={result.allocation} />
         </div>)}</div>
         <AllocationSummary result={result} />
         {!count && <div className="workspace-empty-shortlist"><Network size={25} /><h3>{result.state === "no_open_allocation" ? "Allocation is filled" : "No completed investor cards"}</h3>
-          <p>{result.state === "no_open_allocation" ? "Firm commitments meet or exceed the target. Adjust your round if the allocation changes." : "Only investors with an identified shared round can appear here. Review the scope and exclusions or adjust your profile."}</p><button type="button" className="button text-button" onClick={onEdit}>Adjust profile<ChevronRight size={13} /></button></div>}
+          <p>{result.state === "no_open_allocation" ? "Firm commitments meet or exceed the target. Adjust your round if the allocation changes." : "Investors appear here when Cala identifies a shared round with your lead or a round in your company or a founder's previous company. Review the scope and exclusions or adjust your profile."}</p><button type="button" className="button text-button" onClick={onEdit}>Adjust profile<ChevronRight size={13} /></button></div>}
         <footer className="workspace-shortlist-footer"><span><FileCheck2 size={13} />Select to explore · open details for sources</span>
           {result.combined_draft && <button type="button" className="button text-button" onClick={() => setCombinedOpen(!combinedOpen)} aria-expanded={combinedOpen}>Combined request<ChevronDown size={13} /></button>}</footer>
         {combinedOpen && <div className="workspace-combined"><div><h3>Your combined request</h3><button type="button" className="button workspace-icon-button" aria-label="Close combined request" onClick={() => setCombinedOpen(false)}><X size={15} /></button></div><pre tabIndex={0}>{result.combined_draft}</pre><CopyRequest text={result.combined_draft} label="Copy combined request" /></div>}

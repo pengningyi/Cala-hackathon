@@ -18,7 +18,10 @@ from pydantic import BaseModel, ConfigDict
 
 from .cala import CalaError, CalaMCPProvider
 from .entity_metadata import date_value as _date, parse_entity as _entity, property_value as _value, sources as _sources
-from .models import DetectedLead, Entity, EntityMetadataProperty, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation
+from .models import (
+    DetectedLead, Entity, EntityMetadataProperty, FundEvent, FundingRound, GraphSnapshot, InvestmentObservation,
+    InvestorProfile, Participation, Role,
+)
 from .runtime import BudgetExceeded
 
 
@@ -45,6 +48,58 @@ def _edges(data: dict, direction: str, names: tuple[str, ...]) -> list[dict]:
         if isinstance(value, list):
             result.extend(item for item in value if isinstance(item, dict))
     return result
+
+
+# Preferred relationship names for people and funds. Only names that
+# entity_introspection advertises for the entity are ever requested.
+ROLE_KINDS = {
+    "WORKS_AT": "works_at", "IS_MEMBER_OF": "member_of", "IS_BOARD_MEMBER_OF": "board",
+    "FOUNDED": "founded", "STUDIED_AT": "studied_at",
+}
+PEOPLE_INCOMING = ("WORKS_AT", "IS_MEMBER_OF", "IS_BOARD_MEMBER_OF", "FOUNDED")
+PERSON_OUTGOING = ("WORKS_AT", "IS_MEMBER_OF", "IS_BOARD_MEMBER_OF", "FOUNDED", "STUDIED_AT")
+FUND_OUTGOING = ("MANAGES_FUND", "MANAGES", "SPONSORS_FUND", "LAUNCHED_FUND", "RAISED_FUND")
+
+
+def _roles(data: dict, retrieved_at: datetime, direction: str, anchor: Entity) -> list[Role]:
+    """Typed, sourced person-organisation roles from one projection, never inferred."""
+    roles = []
+    names = PEOPLE_INCOMING if direction == "incoming" else PERSON_OUTGOING
+    for name in names:
+        for edge in _edges(data, direction, (name,)):
+            refs = _sources(edge, retrieved_at)
+            if not edge.get("id") or not refs:
+                continue
+            if direction == "incoming" and edge.get("entity_type") not in ("Person", None):
+                continue
+            since_raw, until_raw = _value(edge, "valid_since"), _value(edge, "valid_until")
+            since, until = _date(since_raw), _date(until_raw)
+            if (since_raw is not None and since is None) or (until_raw is not None and until is None):
+                continue  # unparseable dates stay unknown rather than open-ended
+            current = _value(edge, "is_current")
+            try:
+                other = _entity(edge, retrieved_at)
+            except CalaError:
+                continue
+            person, org = (other, anchor) if direction == "incoming" else (anchor, other)
+            roles.append(Role(person=person, org=org, kind=ROLE_KINDS[name], valid_since=since, valid_until=until,
+                              current=current is True, sources=refs))
+    return roles
+
+
+def _fund_events(data: dict, retrieved_at: datetime) -> list[FundEvent]:
+    events = []
+    for edge in _edges(data, "outgoing", FUND_OUTGOING):
+        refs = _sources(edge, retrieved_at)
+        when = next((d for d in (_date(_value(edge, key)) for key in (
+            "event_date", "announcement_date", "launch_date", "valid_since", "inception_date")) if d), None)
+        if when is None:
+            vintage = _value(edge, "vintage_year")
+            if isinstance(vintage, int) and 1900 < vintage < 2200:
+                when = date(vintage, 1, 1)
+        if when and refs and isinstance(edge.get("name"), str):
+            events.append(FundEvent(name=edge["name"], event_date=when, sources=refs))
+    return events
 
 
 def _round(data: dict, retrieved_at: datetime) -> FundingRound | None:
@@ -94,7 +149,7 @@ def _round(data: dict, retrieved_at: datetime) -> FundingRound | None:
 class CalaNativeProvider:
     def __init__(self, endpoint: str | None = "https://api.cala.ai/mcp/", token: str | None = None,
                  transport: str = "streamable_http", timeout_seconds: float = 15,
-                 api_key: str | None = None, max_graph_rounds: int = 3):
+                 api_key: str | None = None, max_graph_rounds: int = 6):
         self._transport = CalaMCPProvider(endpoint=endpoint, token=token, transport=transport,
                                           timeout_seconds=timeout_seconds, api_key=api_key)
         self._tool_caller: ToolCaller | None = None
@@ -145,6 +200,8 @@ class CalaNativeProvider:
         args = {"name": query, "limit": 8}
         if kind == "company":
             args["entity_types"] = ["Company"]
+        elif kind == "person":
+            args["entity_types"] = ["Person"]
         response = await self._call("entity_search", args)
         raw = response.data.get("entities") if isinstance(response.data, dict) else response.data
         if not isinstance(raw, list):
@@ -294,11 +351,12 @@ class CalaNativeProvider:
         self._known_rounds.update({funding.id: funding for funding in rounds})
         # Relation projections are deliberately bounded, and Cala does not return
         # an exhaustive-coverage declaration. A small page is not proof of coverage.
-        return GraphSnapshot(rounds=rounds, complete=False,
-                             lead=_entity(response.data, response.retrieved_at, metadata_retrieved=True))
+        lead = _entity(response.data, response.retrieved_at, metadata_retrieved=True)
+        return GraphSnapshot(rounds=rounds, complete=False, lead=lead,
+                             people=_roles(response.data, response.retrieved_at, "incoming", lead))
 
     async def investor_profile(self, investor_id: str, lookback_months: int) -> InvestorProfile:
-        response, _ = await self._investor(investor_id)
+        response, schema = await self._investor(investor_id)
         investor = _entity(response.data, response.retrieved_at, metadata_retrieved=True)
         if investor.id != investor_id:
             raise CalaError("cala_entity_mismatch", "Cala returned a different investor")
@@ -330,25 +388,95 @@ class CalaNativeProvider:
                 is_lead=is_lead, sources=sources,
             ))
         return InvestorProfile(investor=investor, rounds=rounds, observations=observations, activity_window_complete=False,
-                               sources=_sources(response.data, response.retrieved_at))
+                               sources=_sources(response.data, response.retrieved_at),
+                               people=_roles(response.data, response.retrieved_at, "incoming", investor),
+                               fund_events=_fund_events(response.data, response.retrieved_at),
+                               fund_data_available=any(name in schema.get("relationships", {}).get("outgoing", [])
+                                                       for name in FUND_OUTGOING))
+
+    async def company_rounds(self, company_id: str, limit: int) -> list[FundingRound]:
+        """A company's own identified funding events (it is the issuer), newest first.
+
+        Used to find your company's existing investors and the backers of the
+        founders' previous companies. Bounded; not a declaration of full history.
+        """
+        if limit <= 0:
+            return []
+        response, _ = await self._entity_projection(company_id, investment_edges=True, location=False)
+        today = datetime.now(timezone.utc).date()
+        candidates = {}
+        for edge in _edges(response.data, "outgoing", ("PARTICIPATES_IN_FUNDING_ROUND", "PARTICIPATES_IN_CORPORATE_EVENT")):
+            if edge.get("entity_type") not in ("FundingRound", "PrivateCompanyFundingRound") or not edge.get("id"):
+                continue
+            role = str(_value(edge, "role", "")).upper()
+            if role and role != "ISSUER":
+                continue
+            event_date = _date(_value(edge, "event_date"))
+            if event_date and event_date > today:
+                continue
+            candidates[edge["id"]] = edge
+        ordered = sorted(candidates.values(), key=lambda item: (
+            -(_date(_value(item, "event_date")) or date.min).toordinal(), item["id"]))[:limit]
+
+        async def read(edge):
+            try:
+                return await self._read_round(edge["id"])
+            except (CalaError, BudgetExceeded):
+                return None
+
+        rounds = [funding for funding in await asyncio.gather(*(read(edge) for edge in ordered))
+                  if funding is not None and funding.company.id == company_id and funding.sources
+                  and (funding.event_date is None or funding.event_date <= today)]
+        return sorted(rounds, key=lambda funding: (-(funding.event_date or date.min).toordinal(), funding.id))
+
+    async def entity_people(self, entity_id: str) -> list[Role]:
+        """People with sourced roles at an organisation (employees, members, board, founders)."""
+        response, _ = await self._entity_projection(entity_id, investment_edges=False, people=True, location=False)
+        org = _entity(response.data, response.retrieved_at)
+        return _roles(response.data, response.retrieved_at, "incoming", org)
+
+    async def person_roles(self, person_id: str) -> list[Role]:
+        """A person's sourced roles at organisations, with validity dates."""
+        schema = (await self._call("entity_introspection", {"entity_id": person_id})).data
+        if not isinstance(schema, dict):
+            raise CalaError("cala_schema_invalid", "Cala entity schema was not an object")
+        available = schema.get("relationships", {}).get("outgoing", [])
+        relationships = {name: {"limit": 20} for name in PERSON_OUTGOING if name in available}
+        if not relationships:
+            return []
+        response = await self._call("entity_retrieval", {"entity_id": person_id, "relationships": {"outgoing": relationships}})
+        if not isinstance(response.data, dict) or response.data.get("id") != person_id:
+            raise CalaError("cala_entity_mismatch", "Cala returned a different person")
+        person = _entity(response.data, response.retrieved_at)
+        return _roles(response.data, response.retrieved_at, "outgoing", person)
 
     async def _investor(self, investor_id: str) -> tuple[ToolPayload, dict]:
-        return await self._entity_projection(investor_id, investment_edges=True)
+        # People and fund edges ride on the same projection call: no extra budget.
+        return await self._entity_projection(investor_id, investment_edges=True, people=True, funds=True)
 
-    async def _entity_projection(self, entity_id: str, *, investment_edges: bool) -> tuple[ToolPayload, dict]:
+    async def _entity_projection(self, entity_id: str, *, investment_edges: bool, people: bool = False,
+                                 funds: bool = False, location: bool = True) -> tuple[ToolPayload, dict]:
         schema = (await self._call("entity_introspection", {"entity_id": entity_id})).data
         if not isinstance(schema, dict):
             raise CalaError("cala_schema_invalid", "Cala entity schema was not an object")
         # Introspection, rather than a hand-picked field list, controls the read.
         properties = list(dict.fromkeys(name for name in schema.get("properties", []) if isinstance(name, str)))
         available = schema.get("relationships", {}).get("outgoing", [])
-        names = ["HAS_HEADQUARTERS_IN", "IS_REGISTERED_IN", "OPERATES_IN_INDUSTRY"]
+        available_in = schema.get("relationships", {}).get("incoming", [])
+        names = ["HAS_HEADQUARTERS_IN", "IS_REGISTERED_IN", "OPERATES_IN_INDUSTRY"] if location else []
         if investment_edges:
             names.extend(["PARTICIPATES_IN_FUNDING_ROUND", "PARTICIPATES_IN_CORPORATE_EVENT"])
+        if funds:
+            names.extend(FUND_OUTGOING)
         relationships = {name: {"limit": 20} for name in names if name in available}
+        incoming = {name: {"limit": 20} for name in PEOPLE_INCOMING if name in available_in} if people else {}
         args = {"entity_id": entity_id, "properties": properties}
-        if relationships:
-            args["relationships"] = {"outgoing": relationships}
+        if relationships or incoming:
+            args["relationships"] = {}
+            if relationships:
+                args["relationships"]["outgoing"] = relationships
+            if incoming:
+                args["relationships"]["incoming"] = incoming
         response = await self._call("entity_retrieval", args)
         if not isinstance(response.data, dict) or response.data.get("id") != entity_id:
             raise CalaError("cala_entity_mismatch", "Cala returned a different entity")

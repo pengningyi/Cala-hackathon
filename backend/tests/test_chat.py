@@ -36,7 +36,7 @@ def test_selected_investor_explanation_uses_recorded_scores_and_sources(saved_re
     card = saved_result.candidates[1]
     response = asyncio.run(ResultChat().reply(saved_result, ChatRequest(message="Why this investor?", selected_investor_id=card.investor.id)))
     assert card.investor.name in response.message
-    assert f"{card.fit_score}/100" in response.message
+    assert f"{card.fit_score} rules met" in response.message
     assert response.candidate_ids == [card.investor.id]
     assert response.model_used is False
     assert response.citations

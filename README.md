@@ -21,9 +21,11 @@ Implemented workflow:
 
 - Company and lead names first, explicit confirmation of both Cala matches, sourced prefills, then founder-completed round details.
 - Same-round graph discovery, bounded parallel profiles, founder exclusions and advisory considerations.
-- Main's deterministic scoring and review flags, separate completeness, source metadata and introduction/follow-up templates.
+- One rule set for scoring and ranking: 12 plain rules (Connection, Activity, Fit, Risk), one point per rule met, shown as "N rules met"; source metadata and introduction/follow-up templates.
+- Trust loops from public professional roles (founder, lead partner, common contacts), a likelihood x trust action, and top-five set selection that aims to fill 1.5-2x the open amount.
 - Main's greedy allocation percentages, labelled as estimates from historical EUR round totals and observed investor counts.
-- A 90-second run budget, retry/call limits, real-response caching and replayable SSE progress.
+- Candidates from the lead's shared rounds, your company's existing investors and backers of the founders' previous companies (no shared lead round required).
+- A 120-second, 72-call run budget, retry limits, real-response caching and replayable SSE progress.
 - Live result chat and semantic assessment through a locally logged-in Codex CLI or your own OpenAI-compatible model API.
 - A responsive frontend with confirmation, live progress, sourced cards, copy actions and do-not-contact reruns.
 

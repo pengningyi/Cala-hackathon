@@ -157,7 +157,7 @@ def test_warm_native_raw_cache_preserves_tool_payload_dates_and_retrieval_metada
 def test_native_parallel_joins_share_four_request_limit_and_keep_trace_steps_isolated(tmp_path):
     async def scenario():
         provider = SyntheticNativeProvider(delay=0.005)
-        retrieval = setup_retrieval(tmp_path, provider)
+        retrieval = setup_retrieval(tmp_path, provider, cala_concurrency=4)
         results = await asyncio.gather(
             retrieval.call("join", {"investor_id": "graph-investor", "details": 6},
                            list[ToolPayload], "lead_graph"),

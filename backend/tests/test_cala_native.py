@@ -200,3 +200,32 @@ def test_native_metadata_rejects_identity_mismatch():
 
     with pytest.raises(CalaError, match="different entity"):
         asyncio.run(CalaNativeProvider().with_tool_caller(call).entity_metadata("lead"))
+
+
+def test_roles_parse_people_edges_with_dates_and_skip_unparseable_or_unsourced():
+    from datetime import datetime, timezone
+    from app.cala_native import _fund_events, _roles
+    from app.models import Entity
+
+    now = datetime(2026, 11, 14, tzinfo=timezone.utc)
+    src = [{"document": "https://synthetic.example.test/role"}]
+    data = {"relationships": {"incoming": {
+        "WORKS_AT": [
+            {"id": "p1", "name": "Partner One", "entity_type": "Person", "sources": src,
+             "properties": {"valid_since": "2019-03-01", "is_current": True}},
+            {"id": "p2", "name": "Bad Date", "entity_type": "Person", "sources": src,
+             "properties": {"valid_since": "sometime"}},
+            {"id": "p3", "name": "No Source", "entity_type": "Person", "properties": {"valid_since": "2019-01-01"}},
+            {"id": "c1", "name": "A Company", "entity_type": "Company", "sources": src},
+        ],
+        "IS_BOARD_MEMBER_OF": [{"id": "p4", "name": "Board Four", "entity_type": "Person", "sources": src,
+                                "properties": {"valid_since": "2014-01-01", "valid_until": "2017-01-01"}}],
+    }}, "relationships_out": {}}
+    fund = Entity(id="fund", name="Fund")
+    roles = _roles(data, now, "incoming", fund)
+    assert [(r.person.id, r.kind, r.current) for r in roles] == [("p1", "works_at", True), ("p4", "board", False)]
+    assert roles[1].valid_until.isoformat() == "2017-01-01" and roles[0].org.id == "fund"
+    events = _fund_events({"relationships": {"outgoing": {"MANAGES_FUND": [
+        {"id": "f3", "name": "Fund III", "sources": src, "properties": {"vintage_year": 2026}},
+        {"id": "f2", "name": "Fund II", "properties": {"vintage_year": 2022}}]}}}, now)
+    assert [(e.name, e.event_date.year) for e in events] == [("Fund III", 2026)]

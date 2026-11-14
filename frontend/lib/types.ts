@@ -86,6 +86,11 @@ export interface FounderInput {
   investor_statuses: StatusEntry[];
   preferences: Preferences;
   excluded_investors?: string[];
+  /** Optional partner at the lead fund who owns this deal. */
+  lead_partner_name?: string | null;
+  founder_person_ids?: string[];
+  /** Loops the founder marked "I know this person". */
+  confirmed_loop_ids?: string[];
 }
 
 export interface ResolveRequest {
@@ -222,6 +227,8 @@ export interface ScoreComponent {
   denominator: number | null;
   explanation: string;
   sources: Source[];
+  /** Rule group (Connection, Activity, Fit, Risk) under rule scoring. */
+  group?: string | null;
 }
 
 export interface Consideration {
@@ -240,6 +247,7 @@ export interface Exclusion {
 
 export interface CandidateCard {
   investor: Entity;
+  /** Under rule scoring: the number of rules met. Older results: a 0-100 score. */
   fit_score: number;
   /** Fraction from 0 to 1, independent of fit_score. */
   profile_completeness: number;
@@ -266,7 +274,47 @@ export interface CandidateCard {
   }>;
   estimated_ticket_eur?: DecimalString | null;
   ticket_estimate_basis?: string | null;
+  /** Reachability (0-1), separate from fit_score; null when no people data exists. */
+  trust?: number | null;
+  loops?: TrustLoop[];
+  recommended_action?: RecommendedAction;
+  action_contact?: Entity | null;
+  /** Why the investor is a candidate; a shared round with the lead is not required. */
+  origins?: CandidateOrigin[];
+  /** Rounds of your company or a founder's previous company that the investor joined. */
+  origin_rounds?: FundingRound[];
 }
+
+export type TrustEdgeType = "worked_together" | "board" | "co_invested" | "person_at_fund" | "led" | "same_school"
+  | "invested_in" | "founded";
+
+export interface TrustHop {
+  from_id: string;
+  from_name: string;
+  to_id: string;
+  to_name: string;
+  edge_type: TrustEdgeType;
+  org: Entity | null;
+  since: string | null;
+  until: string | null;
+  strength: number;
+  sources: Source[];
+}
+
+export interface TrustLoop {
+  id: string;
+  kind: "known" | "one_contact" | "multi_contact" | "lead_loop" | "existing_investor" | "previous_company";
+  contact: Entity | null;
+  /** The loop also closes through the investor's co-investment with your lead. */
+  closes_through_lead?: boolean;
+  hops: TrustHop[];
+  strength: number;
+  confirmed: boolean;
+  label: string;
+}
+
+export type RecommendedAction = "reach_out_directly" | "reach_out_via_contact" | "ask_lead_intro" | "advisor_angel" | "skip";
+export type CandidateOrigin = "lead_network" | "existing_investor" | "previous_company_backer";
 
 export interface AllocationItem {
   investor_id: string | null;

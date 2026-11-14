@@ -36,15 +36,20 @@ def component(card, name):
     return next(item for item in card.components if item.name == name)
 
 
-def test_duplicate_ids_deduplicate_but_main_scoring_counts_distinct_followons():
+def met(card, name):
+    item = component(card, name)
+    return item.value == 1 if item.known else None
+
+
+def test_duplicate_ids_count_once_and_one_company_is_not_a_repeat_partner():
     first = funding()
     followon = funding(id="round2", when=date(2026, 10, 14))
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[first, first, followon]),
                            [first, first, followon], founder(), LEAD, TODAY)
     assert card.shared_round_count == 2
     assert card.shared_company_count == 1
-    assert component(card, "co_investment").value == 1
-    assert component(card, "recent_activity").value == .5
+    assert met(card, "lead_coinvestor") and met(card, "recent_partner") and met(card, "recently_active")
+    assert met(card, "repeat_partner") is False  # two rounds, one company
 
 
 def test_shared_company_different_round_is_not_a_connection():
@@ -52,7 +57,7 @@ def test_shared_company_different_round_is_not_a_connection():
     lead_round.participants = [Participation(investor=LEAD)]
     investor_round = funding(id="other")
     investor_round.participants = [Participation(investor=INVESTOR)]
-    with pytest.raises(ValueError, match="shared with the confirmed lead"):
+    with pytest.raises(ValueError, match="shared round with the lead"):
         score_candidate(InvestorProfile(investor=INVESTOR, rounds=[investor_round]),
                         [lead_round, investor_round], founder(), LEAD, TODAY)
 
@@ -63,33 +68,27 @@ def test_unsourced_or_future_shared_events_cannot_support_a_card():
             score_candidate(InvestorProfile(investor=INVESTOR), [event], founder(), LEAD, TODAY)
 
 
-def test_unknown_fields_contribute_zero_under_main_scoring_with_separate_completeness():
+def test_rules_without_data_are_not_checked_and_score_counts_rules_met():
     event = funding(stage=None, role=None, country=None)
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[event]), [event], founder(), LEAD, TODAY)
-    for name in ["stage_fit", "sector_fit", "non_lead_participation", "geography_fit"]:
-        value = component(card, name)
-        assert not value.known
-        assert value.value == 0
-        assert value.denominator is None
-    assert card.profile_completeness == .55
-    assert card.fit_score == 22  # main:35*.5 +20*.25, Python round(22.5).
+    for name in ["stage_match", "sector_match", "country_match", "your_investor", "backed_your_founder",
+                 "warm_path", "lead_closed_path", "no_competitor"]:
+        assert met(card, name) is None and component(card, name).value == 0
+        assert component(card, name).explanation.startswith("Not checked")
+    assert card.fit_score == 3  # lead co-investor, recent partner, recently active
+    assert all(c.weight == 1 for c in card.components)
 
 
-def test_main_sector_keywords_ignore_llm_numeric_assessments_and_keep_explicit_roles():
+def test_sector_match_uses_sourced_industry_and_ignores_llm_ratings():
     event = funding()
     profile = InvestorProfile(investor=INVESTOR, rounds=[event, funding(id="followon")],
         assessments=[Assessment(company_id="company1", sector_fit="adjacent", rationale="Adjacent buyer", sources=[SOURCE])])
     card = score_candidate(profile, [event], founder(), LEAD, TODAY)
-    assert component(card, "sector_fit").value == 0
-    assert not component(card, "sector_fit").known
-    assert component(card, "non_lead_participation").value == 1
-    assert card.profile_completeness == .85
+    assert met(card, "sector_match") is None  # an LLM rating is not a sourced industry
     event.sector = "Fintech business payments"
-    profile.rounds[1].sector = event.sector
     sourced_card = score_candidate(profile, [event], founder(), LEAD, TODAY)
-    assert component(sourced_card, "sector_fit").value == 1
-    assert component(sourced_card, "sector_fit").denominator == 2
-    assert sourced_card.profile_completeness == 1
+    assert met(sourced_card, "sector_match") is True
+    assert sourced_card.fit_score == card.fit_score + 1
 
 
 def test_status_precedence_and_identity_disambiguation():
@@ -108,8 +107,6 @@ def test_current_published_minimum_excludes_but_historical_typical_and_unclear_m
         mandates=[Mandate(allowed_countries=["Germany"], currently_applicable=False, sources=[SOURCE])])
     assert exclusion_for(INVESTOR, founder(), LEAD, profile) is None
     event = funding()
-    card = score_candidate(profile, [event], founder(), LEAD, TODAY)
-    assert {item.code for item in card.considerations} >= {"participation_size", "historical_mandate"}
     profile.ticket_criteria = [TicketCriterion(kind="published_minimum_initial", minimum_eur=Decimal("1000000"),
                                              currently_applicable=True, sources=[SOURCE])]
     assert exclusion_for(INVESTOR, founder(), LEAD, profile).code == "minimum_initial_ticket"
@@ -117,18 +114,28 @@ def test_current_published_minimum_excludes_but_historical_typical_and_unclear_m
     assert exclusion_for(INVESTOR, founder(), LEAD, profile) is None
 
 
-def test_main_inactivity_flags_and_ratio_minimums_preserve_separate_overlap_context():
+def test_inactivity_fails_one_rule_without_flagging_and_keeps_overlap_context():
     event = funding(when=date(2025, 1, 1), stage="Series A", role=True)
     profile = InvestorProfile(investor=INVESTOR, rounds=[event], activity_window_complete=True, sources=[SOURCE],
         assessments=[Assessment(company_id="company1", sector_fit="same", overlap="direct_substitute",
                                 rationale="Same product, buyer and problem from retrieved descriptions.", sources=[SOURCE])])
     card = score_candidate(profile, [event], founder(), LEAD, TODAY)
     assert exclusion_for(INVESTOR, founder(), LEAD, profile) is None
-    assert {item.code for item in card.considerations} >= {"low_recent_activity", "portfolio_overlap"}
-    assert not {"limited_stage_history", "usually_leads"} & {item.code for item in card.considerations}
-    assert card.review_status == "flagged"
-    assert {flag.kind for flag in card.flags} == {"inactive"}
+    assert met(card, "recently_active") is False and met(card, "recent_partner") is True
+    assert met(card, "stage_match") is False
+    assert "portfolio_overlap" in {item.code for item in card.considerations}
+    assert card.review_status == "short" and card.flags == []
     assert all(item.sources for item in card.considerations if item.basis != "Founder supplied")
+
+
+def test_named_competitor_fails_its_rule_and_flags_the_card():
+    event = funding(company="Rival Pay")
+    context = founder(startup={**founder().startup.model_dump(), "known_competitors": ["rival pay"]})
+    card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[event]), [event], context, LEAD, TODAY)
+    assert met(card, "no_competitor") is False
+    assert card.review_status == "flagged" and card.flags[0].kind == "conflict"
+    clean = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[funding()]), [funding()], context, LEAD, TODAY)
+    assert met(clean, "no_competitor") is True
 
 
 def test_conditional_lead_followup_wording_and_combined_limit():
@@ -151,7 +158,7 @@ def test_stable_tiebreaks_country_mapping_and_calendar_boundaries():
     assert months_before(date(2024, 3, 31), 1) == date(2024, 2, 29)
     event = funding(country="SE")
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[event]), [event], founder(), LEAD, TODAY)
-    assert component(card, "geography_fit").value == 0
+    assert met(card, "country_match") is False
     a = card.model_copy(update={"investor": INVESTOR.model_copy(update={"id": "a", "name": "Alpha"})})
     b = card.model_copy(update={"investor": INVESTOR.model_copy(update={"id": "b", "name": "Beta"})})
     assert [c.investor.id for c in rank_candidates([b, a])] == ["a", "b"]
@@ -168,20 +175,16 @@ def test_round_total_never_becomes_investor_check():
     assert "participation_size" not in {c.code for c in card.considerations}
 
 
-def test_contradictory_duplicate_roles_are_unknown_and_do_not_depend_on_order():
+def test_contradictory_duplicate_roles_do_not_depend_on_order():
     non_lead = funding()
     lead = funding(role=True)
+    cards = []
     for records in [[non_lead, lead], [lead, non_lead]]:
         profile = InvestorProfile(investor=INVESTOR, rounds=records)
         card = score_candidate(profile, records, founder(), LEAD, TODAY)
         assert card.shared_round_count == 1
-        assert not component(card, "non_lead_participation").known
-        assert "usually_leads" not in {item.code for item in card.considerations}
-    repeated_participant = funding()
-    repeated_participant.participants.append(Participation(investor=INVESTOR, is_lead=True))
-    card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[repeated_participant]),
-                           [repeated_participant], founder(), LEAD, TODAY)
-    assert not component(card, "non_lead_participation").known
+        cards.append(card)
+    assert cards[0].components == cards[1].components
 
 
 def test_conflicting_event_identity_cannot_support_a_card():
@@ -262,11 +265,11 @@ def test_iso_metadata_country_names_match_filters_with_main_exact_country_geogra
     # ISO aliases align the field and filter, while main gives no regional bonus.
     context = founder(startup={**context.startup.model_dump(), "country": preference})
     card = score_candidate(InvestorProfile(investor=investor), [funding(country=canonical)], context, LEAD, TODAY)
-    assert component(card, "geography_fit").value == 1
+    assert met(card, "country_match") is True
     regional_peer = "France" if preference == "Moldova" else "Japan"
     context = founder(startup={**context.startup.model_dump(), "country": regional_peer})
     card = score_candidate(InvestorProfile(investor=investor), [funding(country=canonical)], context, LEAD, TODAY)
-    assert component(card, "geography_fit").value == 0
+    assert met(card, "country_match") is False
 
 
 def test_enriched_portfolio_geography_uses_the_headquarters_fields_own_evidence():
@@ -276,49 +279,44 @@ def test_enriched_portfolio_geography_uses_the_headquarters_fields_own_evidence(
                                                     "country_basis": "headquarters_address",
                                                     "country_sources": [headquarters_source]})
     card = score_candidate(InvestorProfile(investor=INVESTOR), [event], founder(), LEAD, TODAY)
-    assert component(card, "geography_fit").value == 1
-    assert component(card, "geography_fit").sources == [headquarters_source]
+    assert met(card, "country_match") is True
+    assert component(card, "country_match").sources == [headquarters_source]
     event.company = event.company.model_copy(update={"country_sources": [], "sources": [SOURCE]})
     card = score_candidate(InvestorProfile(investor=INVESTOR), [event], founder(), LEAD, TODAY)
-    assert not component(card, "geography_fit").known
+    assert met(card, "country_match") is None
 
 
-def test_independent_observations_supply_activity_stage_and_role_without_fake_companies():
+def test_independent_observations_supply_activity_and_stage_without_fake_companies():
     shared = funding(when=date(2023, 1, 1))
     independent_source = Source(url="https://cala.example/investor/candidate/activity", retrieved_at=SOURCE.retrieved_at)
     observations = [
         InvestmentObservation(id="independent1", event_date=TODAY, stage="seed", is_lead=False, sources=[independent_source]),
         InvestmentObservation(id="independent2", event_date=date(2026, 1, 1), stage="Series A", is_lead=True, sources=[independent_source]),
         InvestmentObservation(id="independent3", event_date=date(2025, 2, 1), stage="seed", is_lead=None, sources=[independent_source]),
+        InvestmentObservation(id="undated", event_date=None, stage="Series B", is_lead=True, sources=[independent_source]),
     ]
     profile = InvestorProfile(investor=INVESTOR, observations=observations)
     card = score_candidate(profile, [shared], founder(), LEAD, TODAY)
     assert card.recent_rounds_12m == 2
-    assert component(card, "recent_activity").value == .5
-    assert component(card, "stage_fit").numerator == 2
-    assert component(card, "stage_fit").denominator == 3
-    assert component(card, "non_lead_participation").numerator == 1
-    assert component(card, "non_lead_participation").denominator == 2
-    assert component(card, "non_lead_participation").value == .5
-    assert not component(card, "sector_fit").known
-    assert not component(card, "geography_fit").known
+    assert met(card, "recently_active") is True
+    assert component(card, "recently_active").sources == [independent_source]
+    # Undated rounds still count for stage: 3 seed of 5 known-stage rounds.
+    assert met(card, "stage_match") is True and "3 of 5" in component(card, "stage_match").explanation
+    assert met(card, "recent_partner") is False  # shared round is older than 24 months
+    assert met(card, "sector_match") is None
     assert card.most_recent_investment == TODAY
     assert independent_source in card.sources
-    assert component(card, "recent_activity").sources == [independent_source]
     assert card.shared_round_count == 1
 
 
-def test_observation_duplicate_full_round_counts_once_and_preserves_role_conflict():
+def test_observation_duplicate_full_round_counts_once():
     shared = funding()
     observations = [InvestmentObservation(id=shared.id, event_date=TODAY, stage="seed", is_lead=True, sources=[SOURCE]),
                     InvestmentObservation(id="second", event_date=TODAY, stage="seed", is_lead=False, sources=[SOURCE])]
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[shared], observations=observations),
                            [shared], founder(), LEAD, TODAY)
     assert card.recent_rounds_12m == 2
-    assert component(card, "stage_fit").denominator == 2
-    # Shared full round says non-lead, observation says lead: that event's role is unknown.
-    assert component(card, "non_lead_participation").numerator == 1
-    assert component(card, "non_lead_participation").denominator == 1
+    assert "2 of 2" in component(card, "stage_match").explanation
 
 
 def test_observation_windows_missing_fields_conflicts_and_sources_are_conservative():
@@ -331,12 +329,15 @@ def test_observation_windows_missing_fields_conflicts_and_sources_are_conservati
         InvestmentObservation(id="future", event_date=date(2027, 1, 1), stage="seed", is_lead=False, sources=[SOURCE]),
         InvestmentObservation(id="undated", sources=[SOURCE]),
         InvestmentObservation(id="unsourced", event_date=TODAY, stage="seed", is_lead=False, sources=[]),
-        InvestmentObservation(id="too-old", event_date=date(2024, 1, 1), stage="seed", is_lead=False, sources=[SOURCE]),
+        InvestmentObservation(id="too-old", event_date=date(2019, 1, 1), stage="seed", is_lead=False, sources=[SOURCE]),
     ]
     cards = [score_candidate(InvestorProfile(investor=INVESTOR, observations=records),
                              [shared], founder(), LEAD, TODAY) for records in [items, list(reversed(items))]]
     assert cards[0].components == cards[1].components
-    assert cards[0].recent_rounds_12m == 1
-    assert not component(cards[0], "stage_fit").known
-    assert not component(cards[0], "non_lead_participation").known
+    assert cards[0].recent_rounds_12m == 1  # conflicting dates become undated; future and unsourced are ignored
+    # Known-stage rounds: shared seed + conflict-date seed (undated); conflicting stage, future,
+    # unsourced and the round older than the 60-month lookback are not counted.
+    assert "2 of 2" in component(cards[0], "stage_match").explanation
     assert cards[0].most_recent_investment == TODAY
+
+

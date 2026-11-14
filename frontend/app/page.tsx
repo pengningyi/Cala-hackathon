@@ -9,6 +9,8 @@ import {
 import { ApiError, confirmCompanyMatches, findCompanyMatches, getHealth, getRunResult, startRun, subscribeRunEvents } from "../lib/api";
 import type { CandidateCard, CompanyMatches, Entity, FounderInput, InvestorStatus, OnboardingConfirmation, ProgressEvent, RunResult, RunStatus, Source } from "../lib/types";
 import ResultsWorkspace from "../components/results-workspace";
+import { ACTION_LABELS, ORIGIN_LABELS, hopDates, hopText } from "../lib/trust-labels";
+import { ActionLadder, RuleChecklist } from "../components/score-explainer";
 import EntityMetadata, { EntityIdentity } from "../components/entity-metadata";
 
 type Phase = "identify" | "matches" | "details" | "running" | "results";
@@ -16,7 +18,7 @@ type StatusRow = { investor_name: string; investor_id?: string; status: Investor
 type FormData = {
   founder_name: string; company_name: string; website: string; sector: string; country: string;
   known_competitors: string; stage: "" | "pre_seed" | "seed" | "series_a" | "series_b"; target_eur: string;
-  firm_commitments_eur: string; lead_name: string; excluded_investors: string;
+  firm_commitments_eur: string; lead_name: string; lead_partner_name: string; excluded_investors: string;
   lead_status: "signed" | "firm_verbal" | "conditional" | "unconfirmed";
   include_angels: boolean; include_corporate_vcs: boolean; investor_countries: string;
   statuses: StatusRow[];
@@ -24,7 +26,7 @@ type FormData = {
 const INITIAL: FormData = {
   founder_name: "", company_name: "Cala AI", website: "",
   sector: "", country: "", known_competitors: "", stage: "",
-  target_eur: "", firm_commitments_eur: "", lead_name: "Lightspeed Venture Partners", excluded_investors: "",
+  target_eur: "", firm_commitments_eur: "", lead_name: "Lightspeed Venture Partners", lead_partner_name: "", excluded_investors: "",
   lead_status: "unconfirmed", include_angels: true,
   include_corporate_vcs: true, investor_countries: "", statuses: [],
 };
@@ -88,6 +90,7 @@ function makeProfile(form: FormData): FounderInput {
       firm_commitments_eur: euroAmount(form.firm_commitments_eur, "Already committed"),
       conditional_interest_eur: "0", lead_status: form.lead_status, lead_ticket_eur: null },
     lead_name: form.lead_name,
+    lead_partner_name: form.lead_partner_name.trim() || null,
     excluded_investors: lines(form.excluded_investors),
     investor_statuses: form.statuses.filter(row => row.investor_name.trim() || row.investor_id).map(row => ({
       investor_name: row.investor_name || null, investor_id: row.investor_id || null, statuses: [row.status],
@@ -161,13 +164,31 @@ function Trace({ events, live = false }: { events: ProgressEvent[]; live?: boole
       </details>) : <div className="trace-placeholder">Waiting for the first tool action…</div>}</div></div>;
 }
 
-function Candidate({ card, index, onExclude, busy, initiallyExpanded = false, scoringVersion = "main-1fed306" }: { card: CandidateCard; index: number; onExclude: (card: CandidateCard) => void; busy: boolean; initiallyExpanded?: boolean; scoringVersion?: string }) {
+function TrustSection({ card, busy, onConfirmLoop }: { card: CandidateCard; busy: boolean; onConfirmLoop?: (card: CandidateCard, loopId: string, confirmed: boolean) => void }) {
+  const loops = card.loops || [];
+  return <div className="card-section trust-section"><h4><Network size={14} />How reachable they are</h4>
+    <p className="trust-summary"><strong>{card.trust == null ? "Trust unknown" : `Trust ${card.trust.toFixed(2)}`}</strong>
+      {card.recommended_action && <span className={`workspace-action-chip action-${card.recommended_action}`}>{ACTION_LABELS[card.recommended_action]}{card.action_contact ? ` · ${card.action_contact.name}` : ""}</span>}</p>
+    {card.trust == null ? <p className="small-muted">Cala returned no people data connecting you to this investor. Nothing is inferred.</p>
+      : !loops.length ? <p className="small-muted">No mutual connection within four steps was found in the retrieved roles.</p>
+      : <ul className="trust-loops">{loops.map(loop => <li key={loop.id}><div className="trust-loop-heading"><strong>{label(loop.kind)}{loop.closes_through_lead ? " · closes through your lead" : ""}</strong><span className="mono">strength {loop.strength.toFixed(2)}</span></div>
+        <ol>{loop.hops.map((hop, idx) => <li key={idx}>{hopText(hop)} <span>{hopDates(hop, dateLabel)}</span><Sources sources={hop.sources} title="sources" /></li>)}</ol>
+        <p className="small-muted">{loop.label}</p>
+        {onConfirmLoop && loop.contact && <label className="check-row"><input type="checkbox" disabled={busy} checked={loop.confirmed} onChange={event => onConfirmLoop(card, loop.id, event.target.checked)} /><span>I know {loop.contact.name} (reruns the search)</span></label>}</li>)}</ul>}
+    {card.recommended_action && <ActionLadder card={card} />}
+  </div>;
+}
+
+function Candidate({ card, index, onExclude, onConfirmLoop, busy, initiallyExpanded = false, scoringVersion = "main-1fed306" }: { card: CandidateCard; index: number; onExclude: (card: CandidateCard) => void; onConfirmLoop?: (card: CandidateCard, loopId: string, confirmed: boolean) => void; busy: boolean; initiallyExpanded?: boolean; scoringVersion?: string }) {
   const [expanded, setExpanded] = useState(initiallyExpanded);
-  const mainScoring = scoringVersion.startsWith("main-");
+  // Rule scoring: one point per rule met. Older saved results keep their 0-100 display.
+  const ruleScoring = scoringVersion.startsWith("rules-");
+  const mainScoring = scoringVersion.startsWith("main-") || scoringVersion.startsWith("v2-") || ruleScoring;
   return <article className="candidate-card">
     <div className="candidate-heading"><div className="candidate-identity"><span className="candidate-rank mono">{String(index + 1).padStart(2, "0")}</span>
       <div><h3>{card.investor.name}</h3><div className="meta-row"><EntityIdentity entity={card.investor} /></div></div></div>
-      <div className="fit-score"><strong>{card.fit_score}<span>/100</span></strong><small>Introduction priority</small></div></div>
+      <div className="fit-score">{ruleScoring ? <><strong>{card.fit_score}</strong><small>{card.fit_score === 1 ? "rule met" : "rules met"}</small></>
+        : <><strong>{card.fit_score}<span>/100</span></strong><small>Introduction priority</small></>}</div></div>
     <p className="candidate-explanation">{card.explanation}</p>
     {card.flags?.length ? <div className="card-section main-score-flags"><h4>{card.review_status === "flagged" ? "Needs review" : "Scoring considerations"}</h4>
       <ul>{card.flags.map((flag, idx) => <li className={`main-score-flag main-score-flag-${flag.severity}`} key={`${flag.kind}-${idx}`}>
@@ -176,22 +197,30 @@ function Candidate({ card, index, onExclude, busy, initiallyExpanded = false, sc
     <div className="candidate-metrics"><div><span>Shared rounds</span><strong>{card.shared_round_count}</strong></div>
       <div><span>Shared companies</span><strong>{card.shared_company_count}</strong></div>
       <div><span>Rounds · last 12m</span><strong>{card.recent_rounds_12m ?? <span className="unknown">Unknown</span>}</strong></div>
-      <div><span>Profile completeness</span><strong>{Math.round(card.profile_completeness * 100)}<small>%</small></strong></div></div>
+      {ruleScoring ? <div><span>Rules met</span><strong>{card.fit_score}</strong></div>
+        : <div><span>Profile completeness</span><strong>{Math.round(card.profile_completeness * 100)}<small>%</small></strong></div>}</div>
+    {(card.origin_rounds || []).length > 0 && <div className="card-section"><h4><GitBranch size={14} />Your founder network</h4>
+      <div className="status-chips">{(card.origins || []).map(origin => <span className="chip" key={origin}>{ORIGIN_LABELS[origin]}</span>)}</div>
+      <div className="shared-deals">{card.origin_rounds!.map(deal => <div className="shared-deal" key={deal.id}><span className="small-dot" /><div><strong>{deal.company.name}</strong>
+        <span>{deal.stage ? label(deal.stage) : "Stage unknown"} · {dateLabel(deal.event_date, deal.event_date_precision)}</span><Sources sources={deal.sources} title="sources" /></div></div>)}</div></div>}
     <div className="card-section"><h4><GitBranch size={14} />The connection to your lead</h4><div className="shared-deals">
+      {!card.shared_deals.length && <p className="small-muted">No shared round with your lead was found in the retrieved data. This investor is here through your founder network.</p>}
       {card.shared_deals.map(deal => <div className="shared-deal" key={deal.id}><span className="small-dot" /><div><strong>{deal.company.name}</strong>
         <span>{deal.stage ? label(deal.stage) : "Stage unknown"} · {dateLabel(deal.event_date, deal.event_date_precision)}</span><Sources sources={deal.sources} title="sources" /></div></div>)}</div></div>
+    <TrustSection card={card} busy={busy} onConfirmLoop={onConfirmLoop} />
     {card.considerations.length > 0 && <div className="card-section consideration-section"><h4><CircleHelp size={14} />Questions to take into the conversation</h4>
       <ul className="considerations">{card.considerations.map((item, idx) => <li key={`${item.code}-${idx}`}>
         <span className="consideration-basis">{item.basis}</span><p>{item.text}</p><Sources sources={item.sources} title="sources" /></li>)}</ul></div>}
     <div className="card-actions"><CopyButton text={card.draft} title={card.action === "follow_up" ? "Copy follow-up request" : "Copy introduction request"} className="button primary" />
       <button type="button" className="button text-button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? "Less detail" : "View fit & draft"}<ChevronDown size={14} className={expanded ? "rotated" : ""} /></button></div>
-    {expanded && <div className="candidate-details"><EntityMetadata entity={card.investor} /><div className="detail-title"><h4>How the fit score is built</h4><span>Heuristic, not investment probability</span></div>
-      <div className="component-list">{card.components.map(item => <div className="component" key={item.name}>
+    {expanded && <div className="candidate-details"><EntityMetadata entity={card.investor} /><div className="detail-title"><h4>{ruleScoring ? "Which rules this investor meets" : "How the fit score is built"}</h4><span>{ruleScoring ? "Sourced Cala facts; not an investment probability" : "Heuristic, not investment probability"}</span></div>
+      {ruleScoring ? <RuleChecklist card={card} renderSources={sources => <Sources sources={sources} title="sources" />} />
+        : <div className="component-list">{card.components.map(item => <div className="component" key={item.name}>
         <div><strong>{label(item.name)}</strong><span className="mono">{item.known ? `${Math.round(item.value * 100)}%` : "Unknown"} <small>· weight {item.weight}</small></span></div>
         <div className="component-track"><span style={{ width: `${item.known ? item.value * 100 : mainScoring ? 0 : 50}%` }} className={item.known ? "" : "neutral"} /></div>
         <p>{item.explanation}{item.known && item.numerator != null && item.denominator != null ? ` (${Number(item.numerator.toFixed(2))}/${item.denominator})` : ""}</p>
-        <Sources sources={item.sources} title="sources" /></div>)}</div>
-      <div className="detail-note"><FileCheck2 size={15} /><p>Completeness describes available profile fields. {mainScoring ? "Unknown components contribute zero points; their weights are never redistributed." : "Unknown components retain a neutral value of 0.5; their weights are never redistributed."}</p></div>
+        <Sources sources={item.sources} title="sources" /></div>)}</div>}
+      {!ruleScoring && <div className="detail-note"><FileCheck2 size={15} /><p>Completeness describes available profile fields. {mainScoring ? "Unknown components contribute zero points; their weights are never redistributed." : "Unknown components retain a neutral value of 0.5; their weights are never redistributed."}</p></div>}
       {card.estimated_ticket_eur && <div className="ticket-estimate"><h4>Equal-share ticket estimate</h4><p><strong>{money(card.estimated_ticket_eur)}</strong> from historical EUR round totals divided by participant counts. This is a planning estimate; actual individual checks are unknown.</p></div>}
       <div className="ticket-detail"><h4>Participation size</h4>{card.profile.ticket_criteria.length ? card.profile.ticket_criteria.map((ticket, idx) => <div key={idx}>
         <p><strong>{label(ticket.kind)}</strong>: {money(ticket.minimum_eur)} – {money(ticket.maximum_eur)}. {ticket.currently_applicable ? "Currently applicable." : "Current applicability to confirm."}</p><Sources sources={ticket.sources} /></div>) : <p>Unknown. A company&apos;s total funding round is not an individual investor&apos;s check.</p>}
@@ -328,11 +357,17 @@ export default function Home() {
     setForm(previous => ({ ...previous, statuses: [...previous.statuses, { investor_id: card.investor.id, investor_name: card.investor.name, status: "do_not_contact" }] }));
     await beginRun(snapshot);
   }
+  async function confirmLoop(card: CandidateCard, loopId: string, confirmed: boolean) {
+    if (!result) return;
+    const current = result.profile.confirmed_loop_ids || [];
+    const ids = confirmed ? [...new Set([...current, loopId])] : current.filter(id => id !== loopId);
+    await beginRun({ ...result.profile, startup: { ...result.profile.startup }, confirmed_loop_ids: ids });
+  }
   function editProfile() { setPhase(identity ? "details" : matches ? "matches" : "identify"); setError(null); scrollTop(); }
   let previewGap: number | null = null;
   try { previewGap = Math.max(0, Number(euroAmount(form.target_eur, "Round target", true)) - Number(euroAmount(form.firm_commitments_eur, "Already committed"))); } catch { /* Show the preview after both amounts are valid. */ }
   const latestStep = events.at(-1)?.step;
-  const activeStep = latestStep === "profiles" ? 1 : latestStep === "assessments" || latestStep === "scoring" ? 2 : latestStep === "complete" ? 3 : 0;
+  const activeStep = latestStep === "profiles" || latestStep === "trust" ? 1 : latestStep === "assessments" || latestStep === "scoring" ? 2 : latestStep === "complete" ? 3 : 0;
 
 
   return <div className="app-shell"><header className="topbar"><a className="brand" href="/" aria-label="RoundCloser home"><span className="brand-mark"><GitBranch size={20} strokeWidth={1.7} /></span>roundcloser<span className="brand-beta">BETA</span></a>
@@ -381,7 +416,8 @@ export default function Home() {
               <Field title="Company website" optional hint="A domain such as cala.ai is enough."><input value={form.website} onChange={event => update("website", event.target.value)} placeholder="Company website, if known" autoComplete="url" /></Field>
               <Field title="Sector" hint="Review the prefill or enter your current sector."><input required maxLength={200} value={form.sector} onChange={event => update("sector", event.target.value)} placeholder="Your sector" /></Field>
               <Field title="Headquarters country" optional><input maxLength={100} value={form.country} onChange={event => update("country", event.target.value)} placeholder="Country, if known" autoComplete="country-name" /></Field>
-              <Field title="Confirmed lead investor"><input readOnly value={form.lead_name} /></Field></div>
+              <Field title="Confirmed lead investor"><input readOnly value={form.lead_name} /></Field>
+              <Field title="Lead partner name" optional hint="The partner at your lead who owns this deal. Used to find trust loops through your lead."><input maxLength={200} value={form.lead_partner_name} onChange={event => update("lead_partner_name", event.target.value)} placeholder="Partner name, if known" /></Field></div>
             {Object.values(identity.prefill_sources).some(sources => sources.length > 0) && <details className="prefill-evidence"><summary><Link2 size={13} />Company prefill sources<ChevronDown size={13} /></summary><div>{Object.entries(identity.prefill_sources).filter(([, sources]) => sources.length > 0).map(([field, sources]) => <div key={field}><strong>{field === "country" ? "Headquarters country" : field === "company_name" ? "Company name" : label(field)}</strong><Sources sources={sources} title="prefill sources" /></div>)}</div></details>}
           </section>
           <section className="form-section"><div className="section-heading"><span className="section-number mono">02</span><div><h2>Your current round</h2><p>Historical funding does not establish this round's stage, target or commitments.</p></div></div>
@@ -409,13 +445,13 @@ export default function Home() {
         {identity.notices.map((notice, index) => <div className="inline-note" key={index}><CircleHelp size={15} /><p>{notice}</p></div>)}
       </>}
 
-      {phase === "running" && <><div className="hero compact"><div><span className="running-label"><span className="live-dot" />Search in progress</span><h1>Following the connections.<br /><span>Building your shortlist.</span></h1><p>Retrieving shared rounds, reviewing investor context, and preparing your next ask.</p></div><div className="timer"><strong className="mono">{String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}</strong><span>of a 90-second target</span></div></div>
+      {phase === "running" && <><div className="hero compact"><div><span className="running-label"><span className="live-dot" />Search in progress</span><h1>Following the connections.<br /><span>Building your shortlist.</span></h1><p>Retrieving shared rounds, reviewing investor context, and preparing your next ask.</p></div><div className="timer"><strong className="mono">{String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}</strong><span>of a 120-second target</span></div></div>
         <div className="progress-steps">{STEPS.map((step, idx) => <div key={step} className={idx === activeStep ? "current" : idx < activeStep ? "done" : ""}><span>{idx < activeStep ? <Check size={13} /> : idx === activeStep ? <LoaderCircle size={13} className="spinning" /> : String(idx + 1).padStart(2, "0")}</span><strong>{step}</strong></div>)}</div>
-        <div className="workspace-grid progress-grid"><div><Trace events={events} live />{streamNotice && <div className="inline-note"><Radio size={15} /><p>The live trace is reconnecting. Result polling is still active.</p></div>}{error && <div className="error-banner" role="alert"><CircleHelp size={15} /><span>{error}</span></div>}{recoveryAvailable && <div className="recovery-actions" role="status"><p>The result is taking longer than expected, or this run is no longer available. You can return to your profile and start a fresh search.</p><button type="button" className="button secondary" onClick={() => { setRun(null); editProfile(); }}><ArrowLeft size={14} />Return to your profile</button></div>}</div><aside className="guidance-card progress-aside"><div className="dot-loader" aria-hidden="true">{Array.from({ length: 25 }, (_, idx) => <i key={idx} style={{ animationDelay: `${(idx % 5 + Math.floor(idx / 5)) * .12}s` }} />)}</div><h3>A useful shortlist<br />can be a short one.</h3><p>We return up to five investors with verified shared rounds. When evidence is sparse, you&apos;ll see fewer results and clear gaps.</p><div className="guidance-divider" /><p className="small-muted">The timer started with your confirmation. Unfinished profiles remain incomplete; they are never silently rejected.</p></aside></div></>}
+        <div className="workspace-grid progress-grid"><div><Trace events={events} live />{streamNotice && <div className="inline-note"><Radio size={15} /><p>The live trace is reconnecting. Result polling is still active.</p></div>}{error && <div className="error-banner" role="alert"><CircleHelp size={15} /><span>{error}</span></div>}{recoveryAvailable && <div className="recovery-actions" role="status"><p>The result is taking longer than expected, or this run is no longer available. You can return to your profile and start a fresh search.</p><button type="button" className="button secondary" onClick={() => { setRun(null); editProfile(); }}><ArrowLeft size={14} />Return to your profile</button></div>}</div><aside className="guidance-card progress-aside"><div className="dot-loader" aria-hidden="true">{Array.from({ length: 25 }, (_, idx) => <i key={idx} style={{ animationDelay: `${(idx % 5 + Math.floor(idx / 5)) * .12}s` }} />)}</div><h3>A useful shortlist<br />can be a short one.</h3><p>We return up to five investors with sourced connections: a shared round with your lead, your own cap table, or a founder's previous company. When evidence is sparse, you&apos;ll see fewer results and clear gaps.</p><div className="guidance-divider" /><p className="small-muted">The timer started with your confirmation. Unfinished profiles remain incomplete; they are never silently rejected.</p></aside></div></>}
 
       {phase === "results" && result && <ResultsWorkspace key={result.run_id} result={result} busy={busy} error={error}
         onEdit={editProfile} onRerun={() => void beginRun(result.profile)}
-        renderInvestorDetails={(card, index) => <Candidate card={card} index={index} initiallyExpanded scoringVersion={result.scoring_version} busy={busy} onExclude={candidate => void exclude(candidate)} />}
+        renderInvestorDetails={(card, index) => <Candidate card={card} index={index} initiallyExpanded scoringVersion={result.scoring_version} busy={busy} onExclude={candidate => void exclude(candidate)} onConfirmLoop={(candidate, loopId, confirmed) => void confirmLoop(candidate, loopId, confirmed)} />}
         renderSources={sources => <Sources sources={sources} title="sources" />} trace={<Trace events={events} />} />}
       <footer className="page-footer"><span>roundcloser</span><p>Connections backed by Cala. Introductions guided by you.</p><span className="mono">MVP · EUR</span></footer>
     </div></main></div>;

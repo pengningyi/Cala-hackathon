@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type P
 import { ArrowUpRight, Building2, ExternalLink, GitBranch, Move, Network, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { buildResultGraph, graphFocus, graphSources, type ResultGraphEdge, type ResultGraphNode } from "../lib/result-graph";
 import type { RunResult, Source } from "../lib/types";
+import { hopDates, hopText } from "../lib/trust-labels";
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join("").toUpperCase();
 
@@ -41,6 +42,7 @@ function Evidence({ sources }: { sources: Source[] }) {
 
 const kindName: Record<ResultGraphNode["kind"], string> = {
   founder: "Your company", lead: "Selected lead", investor: "Shortlisted investor", round: "Identified funding round", company: "Portfolio company",
+  contact: "Common contact",
 };
 
 export default function ResultsGraph({ result, selectedInvestorId, onSelectInvestor }: {
@@ -116,12 +118,12 @@ export default function ResultsGraph({ result, selectedInvestorId, onSelectInves
             <g transform={`translate(${graph.width / 2 + pan.x} ${graph.height / 2 + pan.y}) scale(${zoom}) translate(${-graph.width / 2} ${-graph.height / 2})`}>
               <text className="kg-column-label" x="95" y="26" textAnchor="middle">YOUR ROUTE</text><text className="kg-column-label" x="300" y="26" textAnchor="middle">SHARED ROUNDS</text>
               <text className="kg-column-label" x="466" y="26" textAnchor="middle">COMPANIES</text><text className="kg-column-label" x="660" y="26" textAnchor="middle">CO-INVESTORS</text>
-              {graph.edges.map(edge => <path key={edge.id} d={path(edge)} className={`kg-edge kg-edge-${edge.kind}${focus && !focus.edges.has(edge.id) ? " kg-dimmed" : ""}${focus?.edges.has(edge.id) ? " kg-highlighted" : ""}`}
-                fill="none" markerEnd={edge.kind === "issuer" ? `url(#kg-arrow-${markerId})` : undefined}><title>{edge.kind === "founder_route" ? `Founder-selected introduction route; current-round commitment ${result.profile.round.lead_status.replaceAll("_", " ")}` : edge.kind === "issuer" ? "Cala identifies the recipient company of this funding event" : "Cala identifies investor participation in this exact funding event"}</title></path>)}
+              {graph.edges.map(edge => <path key={edge.id} d={path(edge)} className={`kg-edge kg-edge-${edge.kind}${edge.confirmed ? " kg-edge-confirmed" : ""}${focus && !focus.edges.has(edge.id) ? " kg-dimmed" : ""}${focus?.edges.has(edge.id) ? " kg-highlighted" : ""}`}
+                fill="none" markerEnd={edge.kind === "issuer" ? `url(#kg-arrow-${markerId})` : undefined}><title>{edge.kind === "trust" ? `Public professional overlap${edge.confirmed ? ", confirmed by you" : "; personal relationship unconfirmed"}` : edge.kind === "founder_route" ? `Founder-selected introduction route; current-round commitment ${result.profile.round.lead_status.replaceAll("_", " ")}` : edge.kind === "issuer" ? "Cala identifies the recipient company of this funding event" : "Cala identifies investor participation in this exact funding event"}</title></path>)}
               <text className="kg-route-label" x="105" y="191">Founder supplied</text><text className="kg-route-subtitle" x="105" y="207">{result.profile.round.lead_status === "unconfirmed" ? "Commitment unconfirmed" : result.profile.round.lead_status === "conditional" ? "Provisional lead" : result.profile.round.lead_status.replaceAll("_", " ")}</text>
               {graph.nodes.map(node => {
                 const lines = shortLines(node.label, node.kind === "company" ? 19 : 23);
-                const radius = node.kind === "lead" ? 29 : node.kind === "founder" ? 24 : node.kind === "round" ? 10 : node.kind === "company" ? 11 : 21;
+                const radius = node.kind === "lead" ? 29 : node.kind === "founder" ? 24 : node.kind === "round" ? 10 : node.kind === "company" ? 11 : node.kind === "contact" ? 13 : 21;
                 const chosen = inspectedId === node.id || node.kind === "investor" && node.calaId === selectedInvestorId;
                 const nodeKindName = node.kind === "investor" && node.card?.review_status === "flagged" ? "Investor requiring review" : kindName[node.kind];
                 return <g key={node.id} data-kg-node={node.id} role="button" tabIndex={0} aria-pressed={chosen}
@@ -133,6 +135,7 @@ export default function ResultsGraph({ result, selectedInvestorId, onSelectInves
                     : <text className="kg-node-initials" textAnchor="middle" dominantBaseline="central">{initials(node.label)}</text>}
                   {node.kind === "round" ? graph.eventCount <= 6 && <>
                     <text className="kg-node-label" x="0" y="27" textAnchor="middle">{lines[0]}</text><text className="kg-node-meta" x="0" y="43" textAnchor="middle">{dateText(node.funding?.event_date, node.funding?.event_date_precision)}</text></>
+                    : node.kind === "contact" ? <text className="kg-node-label kg-contact-label" x="0" y={radius + 14} textAnchor="middle">{lines[0]}</text>
                     : node.kind === "company" ? lines.slice(0, 2).map((line, index) => <text className="kg-node-label kg-company-label" x="19" y={lines.length > 1 ? index * 15 - 3 : 4} key={index}>{line}</text>)
                       : <>{lines.slice(0, 2).map((line, index) => <text className="kg-node-label" x="0" y={radius + 23 + index * 16} textAnchor="middle" key={index}>{line}</text>)}
                         <text className="kg-node-meta" x="0" y={radius + 23 + lines.length * 16} textAnchor="middle">{node.kind === "founder" ? "Founder profile" : node.kind === "lead" ? "Selected lead" : node.card?.review_status === "flagged" ? "Needs review" : `Priority ${result.candidates.findIndex(card => card.investor.id === node.calaId) + 1}`}</text></>}
@@ -141,13 +144,16 @@ export default function ResultsGraph({ result, selectedInvestorId, onSelectInves
             </g>
           </svg>
         </div>
-        <div className="kg-legend"><span><i className="kg-legend-line" />Cala event evidence</span><span><i className="kg-legend-line kg-legend-dashed" />Founder-supplied lead</span><span><i className="kg-legend-event" />Funding event</span></div>
+        <div className="kg-legend"><span><i className="kg-legend-line" />Cala event evidence</span><span><i className="kg-legend-line kg-legend-dashed" />Founder-supplied lead</span><span><i className="kg-legend-event" />Funding event</span>{graph.nodes.some(node => node.kind === "contact") && <span><i className="kg-legend-line kg-legend-trust" />Trust loop (unconfirmed)</span>}</div>
         <div className="kg-inspector" aria-live="polite">{inspected ? <>
           <div className="kg-inspector-heading"><div><span className="kg-kicker">{inspected.kind === "investor" && inspected.card?.review_status === "flagged" ? "Investor requiring review" : kindName[inspected.kind]}</span><h3>{inspected.label}</h3></div><ArrowUpRight size={16} /></div>
           {inspected.kind === "founder" ? <><p>{result.profile.founder_name ? `${result.profile.founder_name} · ` : ""}{result.profile.startup.sector}{result.profile.startup.country ? ` · ${result.profile.startup.country}` : ""}. Startup details and the selected introduction route are founder supplied. Current-round commitment: {result.profile.round.lead_status.replaceAll("_", " ")}.</p>
             {inspected.calaId && <p>Matched to Cala company {inspected.entity?.name || inspected.calaId} by the founder.</p>}</>
             : inspected.kind === "round" && inspected.funding ? <><p>{dateText(inspected.funding.event_date, inspected.funding.event_date_precision)} · {inspected.funding.stage?.replaceAll("_", " ") || "Stage unknown"} · Recipient: {inspected.funding.company.name}.</p><p>Lines show participation in this exact event. A shared round does not establish a personal relationship or current interest.</p></>
-              : inspected.kind === "investor" && inspected.card ? <><p>{inspected.card.shared_round_count} shared {inspected.card.shared_round_count === 1 ? "round" : "rounds"} across {inspected.card.shared_company_count} {inspected.card.shared_company_count === 1 ? "company" : "companies"}. Introduction priority {inspected.card.fit_score}/100; profile completeness {Math.round(inspected.card.profile_completeness * 100)}%.</p><p>Ask the round assistant about this investor in Chat, or open its shortlist details for sources and the introduction request.</p></>
+              : inspected.kind === "contact" && inspected.loops ? <><p>{inspected.entity?.entity_type === "Person" ? "Cala roles connect this person to your network and to a shortlisted investor. A shared organisation is not proof that people know each other." : "A company in your founder network that this investor backed, according to identified Cala funding events."}</p>
+                <ul className="kg-loop-hops">{inspected.loops[0].hops.map((hop, index) => <li key={index}><strong>{hopText(hop)}</strong>
+                  <span>{hopDates(hop, dateText).replace(/^ · /, "")}{hop.since || hop.until ? " · " : ""}strength {hop.strength.toFixed(2)}</span></li>)}</ul></>
+              : inspected.kind === "investor" && inspected.card ? <><p>{inspected.card.shared_round_count} shared {inspected.card.shared_round_count === 1 ? "round" : "rounds"} across {inspected.card.shared_company_count} {inspected.card.shared_company_count === 1 ? "company" : "companies"}. {result.scoring_version.startsWith("rules-") ? `${inspected.card.fit_score} rules met` : `Introduction priority ${inspected.card.fit_score}/100; profile completeness ${Math.round(inspected.card.profile_completeness * 100)}%`}; trust {inspected.card.trust == null ? "unknown" : inspected.card.trust.toFixed(2)}.</p><p>Ask the round assistant about this investor in Chat, or open its shortlist details for sources and the introduction request.</p></>
                 : <p>{inspected.entity?.description || (inspected.kind === "lead" ? "The founder selected this Cala entity as their current lead. Historical participation is shown separately through funding events." : "Cala identifies this company as the recipient of the connected funding event.")}</p>}
           {inspected.calaId && <small className="kg-entity-id">Cala ID: {inspected.calaId}</small>}
           {inspected.sources.length > 0 && <Evidence sources={inspected.sources} />}

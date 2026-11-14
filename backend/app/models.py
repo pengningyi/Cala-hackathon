@@ -123,6 +123,12 @@ class FounderInput(Model):
     excluded_investors: list[str] = Field(default_factory=list, max_length=100)
     investor_statuses: list[StatusEntry] = Field(default_factory=list, max_length=100)
     preferences: Preferences = Field(default_factory=Preferences)
+    # Optional partner at the lead fund who owns this deal; resolved to a Cala person.
+    lead_partner_name: str | None = Field(default=None, max_length=200)
+    # Founder-confirmed Cala person IDs for the founding team (skips the lookup).
+    founder_person_ids: list[str] = Field(default_factory=list, max_length=10)
+    # Loops the founder ticked "I know this person" on in an earlier run.
+    confirmed_loop_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class ResolveRequest(Model):
@@ -250,6 +256,25 @@ class InvestmentObservation(Model):
     sources: list[Source] = Field(default_factory=list)
 
 
+class Role(Model):
+    """A sourced, typed person-organisation relationship with its validity window."""
+    person: Entity
+    org: Entity
+    kind: Literal["works_at", "member_of", "board", "founded", "studied_at"]
+    valid_since: date | None = None
+    valid_until: date | None = None
+    # True only when Cala explicitly marks the role as current.
+    current: bool = False
+    sources: list[Source] = Field(default_factory=list)
+
+
+class FundEvent(Model):
+    """A sourced announcement of a new fund or vehicle managed by an investor."""
+    name: str
+    event_date: date
+    sources: list[Source] = Field(default_factory=list)
+
+
 class InvestorProfile(Model):
     investor: Entity
     rounds: list[FundingRound] = Field(default_factory=list)
@@ -260,15 +285,22 @@ class InvestorProfile(Model):
     mandates: list[Mandate] = Field(default_factory=list)
     assessments: list[Assessment] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
+    # People affiliated with this fund and announced funds, when Cala advertises them.
+    people: list[Role] = Field(default_factory=list)
+    fund_events: list[FundEvent] = Field(default_factory=list)
+    fund_data_available: bool = False
 
 
 class GraphSnapshot(Model):
     rounds: list[FundingRound] = Field(default_factory=list)
     complete: bool = False
     lead: Entity | None = None
+    # People affiliated with the lead fund, from the same projection call.
+    people: list[Role] = Field(default_factory=list)
 
 
 class ScoreComponent(Model):
+    """One rule result: value 1 = met, 0 = not met; known=False = not checked."""
     name: str
     weight: int
     value: float = Field(ge=0, le=1)
@@ -277,6 +309,7 @@ class ScoreComponent(Model):
     denominator: float | None = None
     explanation: str
     sources: list[Source] = Field(default_factory=list)
+    group: str | None = None
 
 
 class Consideration(Model):
@@ -309,6 +342,32 @@ class AllocationItem(Model):
     basis: str
 
 
+class TrustHop(Model):
+    from_id: str
+    from_name: str
+    to_id: str
+    to_name: str
+    edge_type: Literal["worked_together", "board", "co_invested", "person_at_fund", "led", "same_school",
+                       "invested_in", "founded"]
+    org: Entity | None = None
+    since: date | None = None
+    until: date | None = None
+    strength: float = Field(ge=0, le=1)
+    sources: list[Source] = Field(default_factory=list)
+
+
+class TrustLoop(Model):
+    id: str
+    kind: Literal["known", "one_contact", "multi_contact", "lead_loop", "existing_investor", "previous_company"]
+    contact: Entity | None = None
+    # True when the loop also closes through the candidate's co-investment with your lead.
+    closes_through_lead: bool = False
+    hops: list[TrustHop]
+    strength: float = Field(ge=0, le=1)
+    confirmed: bool = False
+    label: str = "Public professional overlap; personal relationship unconfirmed"
+
+
 class CandidateCard(Model):
     investor: Entity
     fit_score: int
@@ -330,6 +389,15 @@ class CandidateCard(Model):
     flags: list[InvestorFlag] = Field(default_factory=list)
     estimated_ticket_eur: Decimal | None = Field(default=None, ge=0)
     ticket_estimate_basis: str | None = None
+    # Strategy B: reachability, kept separate from the likelihood fit_score.
+    trust: float | None = Field(default=None, ge=0, le=1)
+    loops: list[TrustLoop] = Field(default_factory=list, max_length=3)
+    recommended_action: Literal["reach_out_directly", "reach_out_via_contact", "ask_lead_intro", "advisor_angel", "skip"] = "ask_lead_intro"
+    action_contact: Entity | None = None
+    # Why this investor is a candidate. Shared rounds with the lead are no longer required.
+    origins: list[Literal["lead_network", "existing_investor", "previous_company_backer"]] = Field(default_factory=lambda: ["lead_network"])
+    # Funding events in your company or the founders' previous companies that the investor joined.
+    origin_rounds: list[FundingRound] = Field(default_factory=list)
 
 
 class ProgressEvent(Model):
@@ -363,8 +431,9 @@ class RunResult(Model):
     cala_calls: int
     cache_hits: int
     retrieval_timestamps: list[datetime]
-    scoring_version: str = "main-1fed306"
+    scoring_version: str = "rules-2026-11"
     allocation: list[AllocationItem] = Field(default_factory=list)
+
     error: dict[str, Any] | None = None
 
 

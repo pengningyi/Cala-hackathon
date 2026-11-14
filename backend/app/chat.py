@@ -39,8 +39,8 @@ def _shared_sources(card: CandidateCard) -> list[Source]:
 def _summary_sources(card: CandidateCard, as_of: date) -> list[Source]:
     """Support shared-history and activity claims with their own observations."""
     shared = _shared_sources(card)
-    connection = next((item for item in card.components if item.name == "co_investment"), None)
-    activity = next((item for item in card.components if item.name == "recent_activity"), None)
+    connection = next((item for item in card.components if item.name == "lead_coinvestor"), None)
+    activity = next((item for item in card.components if item.name == "recently_active"), None)
     primary = shared[:1] or (connection.sources[:1] if connection else [])
     activity_refs = []
     if card.recent_rounds_12m is not None and activity is not None and activity.known:
@@ -79,16 +79,26 @@ def _selected(result: RunResult, request: ChatRequest) -> list[CandidateCard]:
 def _summary(card: CandidateCard) -> str:
     rounds = "round" if card.shared_round_count == 1 else "rounds"
     companies = "company" if card.shared_company_count == 1 else "companies"
-    text = (f"{card.investor.name}: {card.fit_score}/100 introduction priority, "
-            f"{round(card.profile_completeness * 100)}% profile completeness. "
+    text = (f"{card.investor.name}: {card.fit_score} rules met "
+            f"({', '.join(c.name.replace('_', ' ') for c in card.components if c.known and c.value >= 1) or 'none'}). "
             f"Cala records {card.shared_round_count} shared {rounds} across "
             f"{card.shared_company_count} {companies} with the confirmed lead.")
+    if "existing_investor" in card.origins:
+        text += " Cala identifies it as an existing investor in your company."
+    if "previous_company_backer" in card.origins:
+        text += " It backed a company a founder previously founded."
     if card.recent_rounds_12m is not None:
         text += f" {card.recent_rounds_12m} investment rounds were observed in the last 12 months."
     else:
         text += " Recent investment activity is unknown in this snapshot."
+    if card.trust is not None:
+        text += f" Trust {card.trust:.2f} from {len(card.loops)} public professional loop(s); relationships are unconfirmed."
+    else:
+        text += " Trust is unknown: no people data connects the founder to this investor."
+    text += f" Suggested action: {card.recommended_action.replace('_', ' ')}"
+    text += f" via {card.action_contact.name}." if card.action_contact else "."
     if card.review_status == "flagged":
-        text += " Main's scoring rules mark this candidate for review."
+        text += " The scoring rules mark this candidate for review."
     if card.flags:
         text += " Flags: " + "; ".join(flag.reason for flag in card.flags) + "."
     return text
@@ -198,9 +208,11 @@ def answer_result(result: RunResult, request: ChatRequest) -> ChatResponse:
         if len(chosen) == 1:
             unknown = [component.name.replace("_", " ") for component in chosen[0].components if not component.known]
             if unknown:
-                message += "\n\nUnknown scoring fields: " + ", ".join(unknown) + "."
+                message += "\n\nRules not checked: " + ", ".join(unknown) + "."
             message += ("\n\nUnknown components contribute zero under main's scoring method. "
                         if result.scoring_version.startswith("main-") else
+                        "\n\nEach rule met earns one point; rules Cala could not check earn none. "
+                        if result.scoring_version.startswith(("v2-", "rules-")) else
                         "\n\nUnknown components keep a neutral value of 0.5. ")
             message += "Completeness measures available fields, not reliability or investment likelihood."
             if chosen[0].considerations:

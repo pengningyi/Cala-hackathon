@@ -55,7 +55,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
                       transport=settings.cala_transport, timeout_seconds=settings.cala_request_timeout_seconds,
                       api_key=settings.cala_api_key)
         provider = (CalaMCPProvider(mapping_path=settings.cala_tool_mapping, **common)
-                    if settings.cala_tool_mapping else CalaNativeProvider(**common))
+                    if settings.cala_tool_mapping else CalaNativeProvider(**common, max_graph_rounds=settings.graph_round_limit))
     if semantic is None and settings.model_provider == "codex":
         semantic = CodexSemantic(executable=settings.codex_executable,
                                  timeout_seconds=settings.model_timeout_seconds, enabled=True)

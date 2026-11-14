@@ -12,18 +12,12 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from statistics import median
 
-from . import main_scoring
+from . import main_scoring, ranker, rules as rule_book
 from .entity_metadata import country_name
 from .models import (
     AllocationItem, CandidateCard, Consideration, Entity, Exclusion, FounderInput, FundingRound,
     InvestmentObservation, InvestorFlag, InvestorProfile, InvestorStatus, ScoreComponent, Source,
 )
-
-
-WEIGHTS = {name: main_scoring.WEIGHTS[key] for name, key in {
-    "co_investment": "coinv", "recent_activity": "activity", "stage_fit": "stage",
-    "sector_fit": "sector", "non_lead_participation": "follow", "geography_fit": "geo",
-}.items()}
 
 
 def normalized_name(value: str) -> str:
@@ -238,15 +232,6 @@ def _behavior_observations(profile: InvestorProfile, shared: list[FundingRound])
     return merged
 
 
-def _component(name: str, value: float | None, explanation: str, sources: list[Source],
-               numerator: float | None = None, denominator: float | None = None) -> ScoreComponent:
-    known = value is not None and bool(sources)
-    return ScoreComponent(name=name, weight=WEIGHTS[name], value=value if value is not None else 0,
-                          known=known, explanation=explanation if known else "Unknown; contributes zero under main-branch scoring.",
-                          numerator=numerator if known else None, denominator=denominator if known else None,
-                          sources=unique_sources(sources) if known else [])
-
-
 def _eur(value: Decimal) -> str:
     return f"EUR {value:,.2f}".removesuffix(".00")
 
@@ -265,7 +250,48 @@ def _shared_phrase(deals: list[FundingRound], limit: int = 2) -> str:
     return " and ".join(phrases)
 
 
+def _origin_reason(origins: list[str], rounds: list[FundingRound], founder: FounderInput, investor: Entity, lead_reason: str) -> str:
+    bits = []
+    own = [r for r in rounds if r.company.id == founder.startup.cala_entity_id]
+    previous = [r for r in rounds if r.company.id != founder.startup.cala_entity_id]
+    if "existing_investor" in origins and own:
+        bits.append(f"Existing investor in {founder.startup.company_name} ({_shared_phrase(own, 1)})")
+    if "previous_company_backer" in origins and previous:
+        bits.append(f"Backed {previous[0].company.name}, a founder's previous company")
+    if "lead_network" in origins:
+        bits.append(lead_reason)
+    elif lead_reason != "Limited data in Cala":
+        # build_reason starts with the (absent) lead connection; keep its activity parts.
+        bits.extend(part for part in lead_reason.split("; ") if not part.startswith("Co-invested with"))
+    return "; ".join(dict.fromkeys(bits)) or "Limited data in Cala"
+
+
+def _direct_draft(card: CandidateCard, founder: FounderInput, lead: Entity) -> str:
+    """Founder-network investors with no shared round: write to the investor directly."""
+    own = [r for r in card.origin_rounds if r.company.id == founder.startup.cala_entity_id]
+    previous = [r for r in card.origin_rounds if r.company.id != founder.startup.cala_entity_id]
+    lead_note = (f" {lead.name} has provisionally agreed to lead." if founder.round.lead_status == "conditional"
+                 else f" We are in discussions with {lead.name} as lead; their commitment is not yet confirmed and is provisional."
+                 if founder.round.lead_status == "unconfirmed" else f" {lead.name} is leading.")
+    context = (f"We are raising a {founder.round.stage.replace('_', ' ')} round for {founder.startup.company_name}, "
+               f"with {_eur(founder.round.remaining_eur)} remaining after firm commitments.{lead_note} ")
+    if own:
+        opening = (f"Thank you again for backing {founder.startup.company_name} "
+                   f"(Cala records your participation in {_shared_phrase(own, 1)}). ")
+        ask = "Would you consider participating in this round, and what would you need from us to decide?"
+    elif previous:
+        opening = (f"Cala records your participation in {_shared_phrase(previous, 1)}, "
+                   f"a company our founding team built before {founder.startup.company_name}. ")
+        ask = "Would you be open to a short conversation about this round?"
+    else:
+        opening, ask = "", "Would you be open to a short conversation about this round?"
+    signature = f"\n\n{founder.founder_name}" if founder.founder_name else ""
+    return f"Hi {card.investor.name},\n\n{opening}{context}{ask}{signature}"
+
+
 def _draft(card: CandidateCard, founder: FounderInput, lead: Entity) -> str:
+    if not card.shared_deals:
+        return _direct_draft(card, founder, lead)
     opening = ("While your lead commitment is provisional, " if founder.round.lead_status == "conditional"
                else "Before a lead commitment is confirmed, " if founder.round.lead_status == "unconfirmed" else "")
     if card.action == "follow_up" and InvestorStatus.EXISTING_SHAREHOLDER in card.statuses:
@@ -288,8 +314,12 @@ def _draft(card: CandidateCard, founder: FounderInput, lead: Entity) -> str:
     else:
         ending = "Would they be appropriate to approach, and would an introduction make sense?"
     signature = f"\n\n{founder.founder_name}" if founder.founder_name else ""
+    path = ""
+    if card.recommended_action in ("reach_out_via_contact", "advisor_angel") and card.action_contact is not None:
+        path = (f"Public Cala records also show a professional overlap with {card.action_contact.name}; "
+                "we have not confirmed a personal relationship. ")
     return (f"Hi {lead.name},\n\n{opening}{request}? "
-            f"Cala shows you participated together in {shared}. {context}{ending}{signature}")
+            f"Cala shows you participated together in {shared}. {path}{context}{ending}{signature}")
 
 
 def _sector_fact(funding: FundingRound) -> tuple[str | None, list[Source]]:
@@ -306,8 +336,16 @@ def _sector_fact(funding: FundingRound) -> tuple[str | None, list[Source]]:
 
 
 def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
-                    founder: FounderInput, lead: Entity, as_of: date) -> CandidateCard:
-    """Use main's numerical rules while retaining branch-one's exact-event evidence."""
+                    founder: FounderInput, lead: Entity, as_of: date,
+                    known_rounds: list[FundingRound] | None = None,
+                    origins: list[str] | None = None,
+                    origin_rounds: list[FundingRound] | None = None,
+                    context=None) -> CandidateCard:
+    """Evaluate the rule set (app/rules.py) over sourced Cala evidence.
+
+    Trust rules start as "not checked" and are re-evaluated once trust loops are
+    measured (finalize_card). The score is the number of rules met.
+    """
     investor = profile.investor
     shared = []
     for item in _dedup_rounds(shared_rounds):
@@ -316,118 +354,98 @@ def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
                 and item.event_date is not None and item.event_date <= as_of):
             shared.append(item)
     shared.sort(key=lambda item: (-item.event_date.toordinal(), item.id))
+    origins = list(dict.fromkeys(origins or ["lead_network"]))
+    origin_rounds = [item for item in _dedup_rounds(origin_rounds or []) if item.sources
+                     and (item.event_date is None or item.event_date <= as_of)
+                     and any(person.investor.id == investor.id for person in item.participants)]
+    origin_rounds.sort(key=lambda item: (-(item.event_date or date.min).toordinal(), item.id))
+    # A shared round with the lead is no longer required, but every card needs
+    # sourced evidence for why it is here: a shared round or an origin round.
+    if not shared and not origin_rounds:
+        raise ValueError("Candidate needs a sourced shared round with the lead or a sourced round in the founder network")
     if not shared:
-        raise ValueError("Candidate must have a sourced, dated funding event shared with the confirmed lead")
+        origins = [origin for origin in origins if origin != "lead_network"]
 
-    known_events = [item for item in _dedup_rounds(profile.rounds + shared)
-                    if item.event_date is not None and item.event_date <= as_of and item.sources
-                    and any(person.investor.id == investor.id for person in item.participants)]
-    observed = [item for item in known_events if months_before(as_of, 24) <= item.event_date]
-    known_behavior = [item for item in _behavior_observations(profile, shared)
-                      if item.event_date is not None and item.event_date <= as_of]
-    observed_behavior = [item for item in known_behavior if item.event_date >= months_before(as_of, 24)]
-    events_by_id = {item.id: item for item in observed}
-    rows = []
-    sector_sources: list[Source] = []
-    geography_sources: list[Source] = []
-    ticket_values: list[Decimal] = []
-    for observation in observed_behavior:
-        funding = events_by_id.get(observation.id)
-        sector, sector_evidence = _sector_fact(funding) if funding else (None, [])
-        country, country_evidence = None, []
-        if funding:
-            country = funding.company_country or funding.company.country
-            country_evidence = funding.sources if funding.company_country else _entity_fact_sources(funding.company, "country")
-            if not country_evidence:
-                country = None
-        investor_ids = sorted({person.investor.id for person in funding.participants}) if funding else []
-        amount = funding.total_amount_eur if funding and investor_ids else None
-        if amount is not None and amount > 0:
-            ticket_values.append(amount / Decimal(len(investor_ids)))
-        sector_sources.extend(sector_evidence)
-        geography_sources.extend(country_evidence)
-        rows.append({"company": funding.company.name if funding else "", "date": observation.event_date.isoformat(),
-                     "stage": observation.stage, "sector": sector, "country": normalize_country(country) if country else "",
-                     "lead": observation.is_lead, "amount": float(amount) if amount is not None else None,
-                     "investors": investor_ids})
+    context = context or rule_book.RuleContext(startup_id=founder.startup.cala_entity_id)
+    own_company = founder.startup.cala_entity_id
+    all_rounds = [item for item in _dedup_rounds(profile.rounds + shared + origin_rounds + (known_rounds or []))
+                  if item.sources and (item.event_date is None or item.event_date <= as_of)
+                  and any(person.investor.id == investor.id for person in item.participants)]
+    behaviour = _behavior_observations(profile, shared + origin_rounds)
+    dated = [item for item in behaviour if item.event_date is not None and item.event_date <= as_of]
+    lookback_start = months_before(as_of, 60)
+    stage_obs = [item for item in behaviour if item.event_date is None or lookback_start <= item.event_date <= as_of]
+    recent = [item for item in dated if (as_of - item.event_date).days <= rule_book.ACTIVE_DAYS]
 
-    sector_terms = [term.strip() for term in re.split(r"[,/;]| and ", founder.startup.sector.lower())
-                    + [founder.startup.sector.lower()] if len(term.strip()) > 2]
-    payload = {"id": investor.id, "name": investor.name, "origin": "lead-graph", "rounds": rows,
-               "shared": [{"company": item.company.name, "stage": item.stage, "date": item.event_date.isoformat()}
-                          for item in shared]}
-    context = {"stage": founder.round.stage, "sector_terms": sector_terms,
-               "country": normalize_country(founder.startup.country), "open_eur": float(founder.round.remaining_eur),
-               "competitors": founder.startup.known_competitors}
-    main_scoring.score_candidate(payload, context, as_of=as_of)
-    signals = payload["signals"]
-    n = len(observed_behavior)
-    recent = [item for item in observed_behavior if (as_of - item.event_date).days <= 365]
-    staged = [item for item in observed_behavior if item.stage]
-    matching = [item for item in observed_behavior if normalize_stage(item.stage) == normalize_stage(founder.round.stage)]
-    known_roles = [item for item in observed_behavior if item.is_lead is not None]
-    non_lead = sum(not item.is_lead for item in known_roles)
-    recent_shared = sum(item.event_date >= date(as_of.year - 2, as_of.month, 1) for item in shared)
-    activity_sources = _sources(observed_behavior) or (profile.sources if profile.activity_window_complete else [])
+    shared_companies = {item.company.id for item in shared}
+    recent_cutoff = months_before(as_of, rule_book.RECENT_PARTNER_MONTHS)
+    recent_shared = [item for item in shared if item.event_date >= recent_cutoff]
+    own_rounds = [item for item in origin_rounds if item.company.id == own_company]
+    previous_rounds = [item for item in origin_rounds if item.company.id != own_company]
     components = [
-        _component("co_investment", signals["coinv"]["v"], signals["coinv"]["label"], _sources(shared),
-                   min(len(shared) + .5 * recent_shared, 3), 3),
-        _component("recent_activity", signals["activity"]["v"], signals["activity"]["label"], activity_sources, len(recent), 4),
-        _component("stage_fit", signals["stage"]["v"], signals["stage"]["label"], _sources(staged), len(matching), n),
-        _component("sector_fit", signals["sector"]["v"], signals["sector"]["label"], sector_sources,
-                   sum(any(term in str(row["sector"]).lower() for term in sector_terms) for row in rows), n),
-        _component("non_lead_participation", signals["follow"]["v"], signals["follow"]["label"], _sources(known_roles),
-                   non_lead, len(known_roles)),
-        _component("geography_fit", signals.get("geo", {}).get("v"), signals.get("geo", {}).get("label", "geography unknown"),
-                   geography_sources),
+        rule_book.result("lead_coinvestor", bool(shared),
+                         f"{len(shared)} shared round(s) with {lead.name}" if shared else f"no shared round with {lead.name} found",
+                         _sources(shared)),
+        rule_book.result("repeat_partner", len(shared_companies) >= 2,
+                         f"shared rounds in {len(shared_companies)} {'company' if len(shared_companies) == 1 else 'companies'}",
+                         _sources(shared)),
+        rule_book.result("recent_partner", bool(recent_shared),
+                         f"latest shared round {shared[0].event_date.isoformat()}" if shared else "no shared round",
+                         _sources(recent_shared or shared)),
+        rule_book.result("your_investor", bool(own_rounds) if (context.startup_rounds_checked or own_rounds) else None,
+                         f"in {_shared_phrase(own_rounds, 1)}" if own_rounds else
+                         ("not in your company's identified rounds" if context.startup_rounds_checked
+                          else "your company's rounds were not read; confirm your company in Cala"),
+                         _sources(own_rounds)),
+        rule_book.result("backed_your_founder", bool(previous_rounds) if (context.previous_companies_checked or previous_rounds) else None,
+                         f"backed {previous_rounds[0].company.name}" if previous_rounds else
+                         ("did not back the founders' previous companies" if context.previous_companies_checked
+                          else "no founder's previous company was found in Cala"),
+                         _sources(previous_rounds)),
+        rule_book.active_rule([item.event_date for item in dated], as_of, _sources(recent or dated)[:6]),
+        *rule_book.fit_rules(investor, founder.startup.sector, founder.startup.country, founder.round.stage,
+                             all_rounds, stage_obs, context, normalize_stage, normalize_country),
     ]
+    competitors = {normalized_name(name) for name in founder.startup.known_competitors if name.strip()}
+    conflicts = [item for item in all_rounds if normalized_name(item.company.name) in competitors
+                 or (item.company.aliases and competitors & {normalized_name(a) for a in item.company.aliases})]
+    flags = []
+    if not competitors:
+        components.append(rule_book.result("no_competitor", None, "no competitors named"))
+    else:
+        components.append(rule_book.result(
+            "no_competitor", not conflicts,
+            f"backed {conflicts[0].company.name}, which you named as a competitor" if conflicts
+            else f"none of its {len(all_rounds)} identified rounds is in a named competitor",
+            _sources(conflicts or all_rounds)[:6]))
+        if conflicts:
+            hit = conflicts[0]
+            flags.append(InvestorFlag(kind="conflict", severity="red", company=hit.company.name, sources=_sources([hit]),
+                                      reason=f"Backed competitor {hit.company.name} ({hit.stage or 'round'}, "
+                                             f"{hit.event_date.isoformat() if hit.event_date else 'date unknown'})"))
+
+    # Equal-share ticket estimate for the allocation panel (not a rule: EUR totals are rare).
+    ticket_values = [item.total_amount_eur / Decimal(len({p.investor.id for p in item.participants}))
+                     for item in all_rounds if item.total_amount_eur and item.participants
+                     and item.event_date and months_before(as_of, 24) <= item.event_date]
     estimated_ticket = (median(ticket_values).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         if ticket_values else None)
     ticket_basis = ("Equal-share heuristic: EUR funding-round total divided by observed investor count; "
                     "actual investor checks are unknown.") if estimated_ticket is not None else None
-    flags = []
-    for flag in payload["flags"]:
-        if flag["kind"] == "conflict":
-            evidence = unique_sources([source for item in observed if item.company.name == flag.get("company") for source in item.sources])
-        elif flag["kind"] == "ticket":
-            evidence = _sources([item for item in observed if item.total_amount_eur is not None])
-        else:
-            evidence = _sources(observed_behavior)
-        reason = flag["reason"]
-        if flag["kind"] == "ticket":
-            reason = (f"The equal-share estimate exceeds the open allocation before display rounding "
-                      f"(rounded estimate {_eur(estimated_ticket)}; open {_eur(founder.round.remaining_eur)}). "
-                      "Actual investor checks are unknown.")
-        flags.append(InvestorFlag(kind=flag["kind"], severity=flag["severity"], reason=reason,
-                                  company=flag.get("company"), sources=evidence))
     considerations: list[Consideration] = []
 
     def add(code: str, content: str, evidence: list[Source], basis: str = "Cala fact"):
         if evidence or basis == "Founder supplied":
             considerations.append(Consideration(code=code, text=content, basis=basis, sources=unique_sources(evidence)))
 
-    codes = {"inactive": "low_recent_activity", "lead-only": "usually_leads", "stage": "limited_stage_history"}
     for flag in flags:
-        if flag.kind in codes:
-            add(codes[flag.kind], flag.reason, flag.sources)
-        elif flag.kind == "conflict":
-            add("founder_competitor", flag.reason + ". Competitor identity supplied by the founder.", flag.sources, "Founder supplied")
-    companies = {item.company.id: item.company for item in observed}
+        add("founder_competitor", flag.reason + ". Competitor identity supplied by the founder.", flag.sources, "Founder supplied")
+    companies = {item.company.id: item.company for item in all_rounds}
     for assessment in profile.assessments:
-        if (assessment.company_id in companies and assessment.company_id != founder.startup.cala_entity_id
+        if (assessment.company_id in companies and assessment.company_id != own_company
                 and assessment.sources and assessment.overlap in ("adjacent_business", "possible_overlap", "direct_substitute")):
-            add("portfolio_overlap", f"LLM assessment: {companies[assessment.company_id].name} ? "
+            add("portfolio_overlap", f"LLM assessment: {companies[assessment.company_id].name} - "
                 f"{assessment.overlap.replace('_', ' ')}. {assessment.rationale}", assessment.sources, "LLM assessment")
-    for criterion in profile.ticket_criteria:
-        lo, hi = criterion.minimum_eur, criterion.maximum_eur
-        above = lo is not None and lo > founder.round.remaining_eur
-        broad = lo is not None and hi is not None and hi > lo and (lo == 0 or hi >= 2 * lo)
-        if criterion.sources and (above or broad or not criterion.currently_applicable):
-            amount = f"{_eur(lo) if lo is not None else 'unknown'} to {_eur(hi) if hi is not None else 'unknown'}"
-            add("participation_size", f"{criterion.kind.replace('_', ' ')}: {amount}; confirm current applicability and whether a smaller participation is possible.", criterion.sources)
-    for mandate in profile.mandates:
-        if mandate.sources and not mandate.currently_applicable:
-            add("historical_mandate", "Published mandate has unclear current applicability; confirm current stage and geography appetite.", mandate.sources)
     statuses = statuses_for(investor, founder)
     if statuses:
         add("existing_relationship", "Founder supplied: " + ", ".join(status.value.replace("_", " ") for status in statuses) + ".", [], "Founder supplied")
@@ -436,22 +454,27 @@ def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
     if ((not founder.preferences.include_angels or not founder.preferences.include_corporate_vcs)
             and not (investor.kind in ("vc", "angel", "corporate_vc") and _entity_fact_sources(investor, "kind"))):
         add("investor_type_unknown", "The founder's investor-type preference cannot be verified from sourced investor facts; confirm eligibility.", [], "Founder supplied")
+    lead_reason = "Limited data in Cala"
+    if shared:
+        names = ", ".join(item.company.name for item in shared[:2])
+        lead_reason = f"Co-invested with {lead.name} in {names}" + (f" and {len(shared) - 2} more" if len(shared) > 2 else "")
     card = CandidateCard(
-        investor=investor, fit_score=payload["score"],
-        profile_completeness=sum(item.weight for item in components if item.known) / 100,
-        explanation=main_scoring.build_reason(payload, lead.name),
-        shared_round_count=len(shared), shared_company_count=len({item.company.id for item in shared}),
-        shared_deals=shared[:3], recent_rounds_12m=payload["rounds_12m"],
-        most_recent_investment=max((item.event_date for item in known_behavior), default=None),
-        components=components, considerations=considerations, statuses=statuses, profile=profile,
-        sources=unique_sources(investor.sources + profile.sources + _sources(shared + observed) + _sources(known_behavior)
+        investor=investor, fit_score=0, profile_completeness=0,
+        explanation=_origin_reason(origins, origin_rounds, founder, investor, lead_reason),
+        shared_round_count=len(shared), shared_company_count=len(shared_companies),
+        shared_deals=shared[:3], recent_rounds_12m=len(recent) if dated else None,
+        most_recent_investment=max((item.event_date for item in dated), default=None),
+        components=[], considerations=considerations, statuses=statuses, profile=profile,
+        sources=unique_sources(investor.sources + profile.sources + _sources(all_rounds)
                                + [source for component in components for source in component.sources]),
-        action="follow_up" if any(status in statuses for status in (InvestorStatus.EXISTING_SHAREHOLDER,
+        origins=origins, origin_rounds=origin_rounds[:4],
+        action="follow_up" if "existing_investor" in origins or any(status in statuses for status in (InvestorStatus.EXISTING_SHAREHOLDER,
                                   InvestorStatus.ALREADY_APPROACHED, InvestorStatus.IN_CONVERSATION,
                                   InvestorStatus.CONDITIONAL_INTEREST)) else "introduction",
-        review_status=payload["status"], flags=flags, estimated_ticket_eur=estimated_ticket,
+        review_status="flagged" if flags else "short", flags=flags, estimated_ticket_eur=estimated_ticket,
         ticket_estimate_basis=ticket_basis, draft="",
     )
+    rule_book.apply(card, components + rule_book.trust_rules(card))
     card.draft = _draft(card, founder, lead)
     return card
 
@@ -484,15 +507,22 @@ def build_allocation(cards: list[CandidateCard], remaining: Decimal) -> list[All
 
 
 def rank_candidates(cards: list[CandidateCard]) -> list[CandidateCard]:
-    def key(card: CandidateCard):
-        connection = next(c.value for c in card.components if c.name == "co_investment")
-        most_recent = max((r.event_date for r in card.shared_deals if r.event_date), default=date.min)
-        return (card.review_status != "short", -card.fit_score, -connection, -most_recent.toordinal(), normalized_name(card.investor.name), card.investor.id)
-    return sorted(cards, key=key)
+    """Rules met, then Connection rules met, then most recent evidence, then name."""
+    return ranker.rank(cards)
+
+
+def finalize_card(card: CandidateCard, founder: FounderInput, lead: Entity) -> CandidateCard:
+    """Re-evaluate the trust rules, set the rule-based action and refresh the draft."""
+    rule_book.apply(card, rule_book.trust_rules(card))
+    action, contact = ranker.recommended_action(card)
+    card.recommended_action, card.action_contact = action, contact
+    card.draft = _draft(card, founder, lead)
+    return card
 
 
 def combined_draft(cards: list[CandidateCard], founder: FounderInput, lead: Entity) -> str:
-    chosen = [card for card in rank_candidates(cards) if card.review_status == "short"][:3]
+    # The combined request asks the lead, so it only covers investors connected to the lead.
+    chosen = [card for card in rank_candidates(cards) if card.review_status == "short" and card.shared_deals][:3]
     if not chosen:
         return ""
     provisional = (" Your lead commitment is provisional." if founder.round.lead_status == "conditional"

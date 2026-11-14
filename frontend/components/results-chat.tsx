@@ -39,7 +39,7 @@ function welcome(result: RunResult): Message {
     content = "There are no completed investor cards in this run. Ask me about the search scope, exclusions or missing information. I can explain the evidence we have, without adding unsupported recommendations.";
   } else {
     const lead = result.lead ? ` through ${result.lead.name}` : "";
-    content = `Your shortlist contains ${count} lead-connected ${count === 1 ? "investor" : "investors"}${lead}. Ask me why they appear, compare the options, or work through an introduction request.`;
+    content = `Your shortlist contains ${count} ${count === 1 ? "investor" : "investors"} from your lead's network and your founder network${lead}. Ask me why they appear, compare the options, or work through an introduction request.`;
     if (result.profile.round.lead_status === "conditional") content += " Your lead commitment is provisional.";
     if (result.profile.round.lead_status === "unconfirmed") content += " Your lead commitment is unconfirmed.";
     if (result.state === "partial") content += " Coverage is partial; missing facts stay unknown.";

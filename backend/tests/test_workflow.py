@@ -241,13 +241,14 @@ def test_sparse_profile_keeps_unknowns_and_main_zero_score_components(tmp_path):
         graph = GraphSnapshot(rounds=[funding("shared", [entity("lead"), entity("sparse")], days=1000)], complete=True)
         _, record = await complete_run(Workflow(settings(tmp_path), SyntheticProvider(graph=graph)))
         card = record.result.candidates[0]
-        assert card.profile_completeness == 0.35
-        assert card.recent_rounds_12m is None
+        assert card.recent_rounds_12m == 0  # one dated round, older than 12 months
         assert card.profile.assessments == []
-        assert all(not component.known and component.value == 0
-                   for component in card.components if component.name != "co_investment")
+        # One old shared round: connected, at your stage and country, but neither recent nor active.
+        assert {c.name for c in card.components if c.known and c.value == 1} == {"lead_coinvestor", "stage_match", "country_match"}
+        assert card.fit_score == 3
+        assert {c.name for c in card.components if c.known and c.value == 0} == {"repeat_partner", "recent_partner", "recently_active"}
         assert card.shared_round_count == 1 and len(record.result.candidates) == 1
-        assert record.result.scoring_version == "main-1fed306"
+        assert record.result.scoring_version == "rules-2026-11"
         assert len(record.result.allocation) == 1
         assert record.result.allocation[0].investor_id is None
         assert record.result.allocation[0].amount_eur == record.result.remaining_allocation_eur
@@ -304,17 +305,20 @@ def test_statuses_exclude_before_profiling_and_adapt_existing_conversation(tmp_p
     asyncio.run(scenario())
 
 
-def test_concurrency_is_bounded_to_four_and_profiles_to_five(tmp_path):
+def test_concurrency_is_bounded_and_a_pool_of_eight_yields_a_set_of_five(tmp_path):
     async def scenario():
-        candidates = [entity(f"candidate-{i}") for i in range(12)]
+        candidates = [entity(f"candidate-{i}") for i in range(18)]
         provider = SyntheticProvider(graph=GraphSnapshot(
             rounds=[funding("shared", [entity("lead"), *candidates])], complete=True), profile_delay=0.01)
         _, record = await complete_run(Workflow(settings(tmp_path), provider))
-        assert provider.max_active_profiles == 4
-        assert len([c for c in provider.calls if c[0] == "investor_profile"]) == 5
+        assert provider.max_active_profiles == 6
+        assert len([c for c in provider.calls if c[0] == "investor_profile"]) == 8
         assert len(record.result.candidates) == 5
-        assert record.result.counts["discovered"] == 12
-        assert any(e.step == "lead_graph" and e.count == 10 for e in record.trace.events)
+        assert record.result.counts["discovered"] == 18
+        assert any(e.step == "lead_graph" and e.count == 15 for e in record.trace.events)
+        # No people data in this provider: trust stays unknown, never zero-filled.
+        assert all(card.trust is None and card.loops == [] for card in record.result.candidates)
+        assert any(e.type == "loops" for e in record.trace.events)
     asyncio.run(scenario())
 
 
@@ -369,7 +373,7 @@ def test_twenty_attempt_budget_includes_transient_retries(tmp_path):
 
     async def scenario():
         provider = RetryProvider()
-        config = settings(tmp_path)
+        config = settings(tmp_path, cala_call_limit=20)
         retrieval = Retrieval(provider, ResponseCache(config.cache_dir, 0, "synthetic"), config, Trace())
         for index in range(10):
             await retrieval.call("search_entities", {"query": f"investor-{index}", "kind": "investor"},
@@ -539,3 +543,101 @@ def test_lead_aliases_learned_from_graph_are_excluded_before_profiles(tmp_path):
         assert not any(call[0] == "investor_profile" for call in provider.calls)
 
     asyncio.run(run())
+
+
+def test_trust_loops_flow_end_to_end_and_use_people_lookups(tmp_path):
+    from datetime import date
+    from app.models import Role
+
+    def person(pid):
+        return Entity(id=pid, name=f"Person {pid}", entity_type="Person", sources=[evidence()])
+
+    def at(pid, org, since, until=None, kind="works_at", current=False):
+        return Role(person=person(pid), org=org, kind=kind, valid_since=since, valid_until=until,
+                    current=current, sources=[evidence()])
+
+    vilynx = entity("vilynx", kind="company")
+    kibo, other = entity("kibo"), entity("other")
+
+    class PeopleProvider(SyntheticProvider):
+        async def person_roles(self, person_id):
+            self.calls.append(("person_roles", person_id))
+            return [at("elisenda", vilynx, date(2012, 1, 1), date(2018, 1, 1), kind="founded")]
+
+        async def entity_people(self, entity_id):
+            self.calls.append(("entity_people", entity_id))
+            return [at("sonia", vilynx, date(2014, 1, 1), date(2017, 1, 1), kind="board")] if entity_id == "vilynx" else []
+
+    profiles = {"kibo": InvestorProfile(investor=kibo, people=[at("sonia", kibo, date(2017, 6, 1), current=True)])}
+    provider = PeopleProvider(graph=GraphSnapshot(rounds=[funding("shared", [entity("lead"), kibo, other])], complete=True),
+                              profiles=profiles)
+
+    async def scenario():
+        _, record = await complete_run(Workflow(settings(tmp_path), provider),
+                                       founder(founder_person_ids=["elisenda"]))
+        cards = {c.investor.id: c for c in record.result.candidates}
+        assert ("person_roles", "elisenda") in provider.calls and ("entity_people", "vilynx") in provider.calls
+        loop = cards["kibo"].loops[0]
+        assert loop.kind == "known" and loop.contact.id == "sonia" and not loop.confirmed
+        assert [h.edge_type for h in loop.hops] == ["board", "person_at_fund", "co_invested", "led"]
+        assert loop.closes_through_lead
+        assert cards["kibo"].trust > 0 and cards["other"].trust is None
+        assert cards["kibo"].recommended_action in ("reach_out_via_contact", "advisor_angel")
+        assert "not confirmed a personal relationship" in cards["kibo"].draft
+        assert any(e.type == "loops" and e.count == 1 for e in record.trace.events)
+        # A founder confirmation raises trust on rerun.
+        _, again = await complete_run(Workflow(settings(tmp_path), provider),
+                                      founder(founder_person_ids=["elisenda"], confirmed_loop_ids=[loop.id]))
+        rerun = {c.investor.id: c for c in again.result.candidates}["kibo"]
+        assert rerun.loops[0].confirmed and rerun.trust > cards["kibo"].trust
+    asyncio.run(scenario())
+
+
+def test_founder_network_investors_enter_without_a_shared_lead_round(tmp_path):
+    from datetime import date
+    from app.models import Role
+
+    startup = entity("startup", kind="company")
+    previous = entity("previous-co", kind="company")
+    cap_table_fund, backer, co_investor = entity("cap-fund"), entity("backer"), entity("co")
+    elisenda = Entity(id="elisenda", name="Elisenda", entity_type="Person", sources=[evidence()])
+
+    class NetworkProvider(SyntheticProvider):
+        async def company_rounds(self, company_id, limit):
+            self.calls.append(("company_rounds", company_id, limit))
+            issuer = startup if company_id == "startup" else previous
+            participant = cap_table_fund if company_id == "startup" else backer
+            return [FundingRound(id=f"round-{company_id}", company=issuer, event_date=date(2024, 3, 1), stage="seed",
+                                 participants=[Participation(investor=participant, is_lead=False)], sources=[evidence()])]
+
+        async def person_roles(self, person_id):
+            return [Role(person=elisenda, org=previous, kind="founded", valid_since=date(2012, 1, 1),
+                         valid_until=date(2018, 1, 1), sources=[evidence()])]
+
+        async def entity_people(self, entity_id):
+            return []
+
+    provider = NetworkProvider(graph=GraphSnapshot(rounds=[funding("shared", [entity("lead"), co_investor])], complete=True))
+    profile = founder(founder_person_ids=["elisenda"])
+    profile.startup.cala_entity_id = "startup"
+
+    async def scenario():
+        workflow = Workflow(settings(tmp_path), provider)
+        resolved = await workflow.resolve(ResolveRequest(profile=profile))
+        resolved.startup_matches.append(startup)  # founder confirmed this Cala company
+        status = workflow.start(StartRunRequest(resolution_id=resolved.id, lead_id="lead", profile_confirmed=True, profile=profile))
+        record = workflow.get(status.id)
+        await record.task
+        cards = {c.investor.id: c for c in record.result.candidates}
+        assert set(cards) == {"cap-fund", "backer", "co"}
+        assert cards["cap-fund"].origins == ["existing_investor"] and cards["cap-fund"].shared_deals == []
+        assert cards["cap-fund"].recommended_action == "reach_out_directly" and cards["cap-fund"].action == "follow_up"
+        assert cards["cap-fund"].draft.startswith("Hi Synthetic cap-fund") and "Thank you again for backing" in cards["cap-fund"].draft
+        assert cards["cap-fund"].loops[0].kind == "existing_investor"
+        assert cards["backer"].origins == ["previous_company_backer"]
+        assert cards["backer"].loops[0].kind == "previous_company" and cards["backer"].loops[0].contact.id == "previous-co"
+        assert "Backed Synthetic previous-co" in cards["backer"].explanation
+        # The combined request goes to the lead, so it only lists lead-connected investors.
+        assert "Synthetic co" in record.result.combined_draft and "cap-fund" not in record.result.combined_draft
+        assert any(e.step == "founder_network" for e in record.trace.events)
+    asyncio.run(scenario())

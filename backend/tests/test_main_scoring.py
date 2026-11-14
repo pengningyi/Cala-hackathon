@@ -60,18 +60,16 @@ COMPATIBLE = [case for case in GOLDEN["cases"] if case["name"] not in (
 
 
 @pytest.mark.parametrize("case", COMPATIBLE, ids=lambda case: case["name"])
-def test_typed_adapter_preserves_main_scores_ratios_flags_and_ticket_estimate(case):
+def test_typed_adapter_keeps_main_ticket_estimate_activity_count_and_competitor_flag(case):
+    """Scoring is now the rule set; main's ticket estimate and competitor flag carry over."""
     founder, profile, shared = typed_case(case)
     card = score_candidate(profile, shared, founder, LEAD, AS_OF)
     expected = case["expected"]
-    assert card.fit_score == expected["score"]
-    assert card.review_status == expected["status"]
     assert card.recent_rounds_12m == expected["rounds_12m"]
-    assert {(flag.kind, flag.severity) for flag in card.flags} == {
-        (flag["kind"], flag["severity"]) for flag in expected["flags"]}
-    for component in card.components:
-        value = expected["signals"].get(SIGNALS[component.name], {}).get("v")
-        assert component.value == pytest.approx(value if value is not None else 0)
+    conflicts = {(flag["kind"], flag["severity"]) for flag in expected["flags"] if flag["kind"] == "conflict"}
+    assert {(flag.kind, flag.severity) for flag in card.flags} == conflicts
+    assert card.review_status == ("flagged" if conflicts else "short")
+    assert card.fit_score == sum(1 for c in card.components if c.known and c.value == 1)
     assert card.estimated_ticket_eur == Decimal(str(expected["ticket"]))
     assert "Equal-share heuristic" in card.ticket_estimate_basis
     assert "actual investor checks are unknown" in card.ticket_estimate_basis

@@ -4,21 +4,24 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
+from . import ranker, rules as rule_book, trust
 from .config import Settings
 from .models import (
     CompanyConfirmation, CompanyMatches, CompanyMatchRequest, ConfirmCompanyMatches,
     DetectedLead, Entity, FounderInput, FundingRound, GraphSnapshot, InvestorProfile, Resolution,
-    ResolveRequest, RunResult, RunStatus, StartRunRequest,
+    ResolveRequest, Role, RunResult, RunStatus, StartRunRequest,
 )
 from .onboarding import startup_prefill
 from .runtime import BudgetExceeded, ResponseCache, Retrieval, Trace, utcnow
 from .scoring import (
-    build_allocation, combined_draft, deduplicate_rounds, exclusion_for, months_before, normalize_stage, normalized_name,
-    rank_candidates, score_candidate,
+    build_allocation, combined_draft, deduplicate_rounds, exclusion_for, finalize_card, months_before, normalize_stage,
+    normalized_name, score_candidate,
 )
+
+PEOPLE_PAGE_LIMIT = 20  # a full page means the organisation's size is unknown, not 20
 
 
 class WorkflowError(Exception):
@@ -318,6 +321,139 @@ class Workflow:
         record.task = asyncio.create_task(self._execute(record))
         return record.status()
 
+    async def _optional(self, retrieval, operation, args, result_type, *, enabled=True):
+        """A bounded lookup whose failure leaves its signal unknown and never blocks the run."""
+        from .cala import CalaError
+        if not enabled or not hasattr(self.provider, operation):
+            return None
+        try:
+            return await retrieval.call(operation, args, result_type, "trust")
+        except (CalaError, BudgetExceeded):
+            return None
+
+    @staticmethod
+    def _add_origin(rounds, origin, lead, entities, origin_rounds, origins):
+        for funding in rounds:
+            for participation in funding.participants:
+                investor = participation.investor
+                if investor.id == lead.id:
+                    continue
+                entities.setdefault(investor.id, investor)
+                if funding.id not in {r.id for r in origin_rounds.get(investor.id, [])}:
+                    origin_rounds.setdefault(investor.id, []).append(funding)
+                origins.setdefault(investor.id, set()).add(origin)
+
+    @staticmethod
+    def _preliminary(entities, origins, candidate_rounds, origin_rounds, founder, lead, excluded, limit):
+        """Existing investors first, then lead-network depth/recency/stage, then founder-network backers."""
+        preliminary = []
+        for investor in entities.values():
+            exclusion = exclusion_for(investor, founder, lead)
+            if exclusion:
+                if investor.id not in {e.investor.id for e in excluded}:
+                    excluded.append(exclusion)
+            else:
+                preliminary.append(investor)
+
+        def key(e):
+            shared = candidate_rounds.get(e.id, [])
+            evidence = shared + origin_rounds.get(e.id, [])
+            source_rank = (0 if "existing_investor" in origins.get(e.id, ()) else
+                           1 if shared and "previous_company_backer" in origins.get(e.id, ()) else
+                           2 if shared else 3)
+            return (source_rank, -len({r.company.id for r in evidence}),
+                    -max(((r.event_date or date.min).toordinal() for r in evidence), default=0),
+                    -sum(normalize_stage(r.stage) == founder.round.stage for r in shared),
+                    e.name.casefold(), e.id)
+        preliminary.sort(key=key)
+        return preliminary[:limit]
+
+    async def _profile(self, retrieval, entities, limit, founder, lead, profiles, excluded, incomplete, notices, trace):
+        """Profile up to `limit` more investors, backfilling exclusions within the budget."""
+        from .cala import CalaError
+        target = len(profiles) + max(0, limit)
+        cursor = fetched = 0
+        while len(profiles) < target and cursor < len(entities) and retrieval.remaining() > 0:
+            batch = entities[cursor:cursor + target - len(profiles)]
+            cursor += len(batch)
+
+            async def profile_one(entity):
+                try:
+                    profile = await retrieval.call("investor_profile", {"investor_id": entity.id, "lookback_months": 24}, InvestorProfile, "profiles")
+                    if profile.investor.id != entity.id:
+                        raise CalaError("invalid_profile", "Cala returned a different investor ID")
+                    return entity, profile, None
+                except (CalaError, BudgetExceeded) as exc:
+                    return entity, None, exc
+
+            failed = False
+            for entity, profile, failure in await asyncio.gather(*(profile_one(e) for e in batch)):
+                if failure:
+                    failed = True
+                    incomplete.append(entity)
+                    notices.append(f"Profile incomplete for {entity.name}; not rejected.")
+                    trace.emit("profiles", "Candidate profile unavailable; retained as incomplete", type="notice", count=1)
+                    continue
+                fetched += 1
+                exclusion = exclusion_for(profile.investor, founder, lead, profile)
+                if exclusion:
+                    excluded.append(exclusion)
+                else:
+                    profiles.append(profile)
+            # A failed retrieval remains pending; do not spend the full budget chasing replacements.
+            if failed:
+                break
+        if cursor < len(entities) and len(profiles) < target:
+            incomplete.extend(e for e in entities[cursor:] if e.id not in {i.id for i in incomplete})
+        return fetched
+
+    async def _trust_people(self, retrieval, founder_ids, lead_partner, skip_orgs, as_of):
+        """Wave 1 person roles, then a bounded set of their organisations' people.
+
+        Returns (roles, observed headcounts, founder entities). Budget exhaustion
+        returns what was found; missing people data leaves trust unknown.
+        """
+        limit = self.settings.trust_person_limit
+        people = founder_ids[:max(0, limit - (1 if lead_partner else 0))]
+        if lead_partner:
+            people.append(lead_partner.id)
+        results = await asyncio.gather(*(self._optional(retrieval, "person_roles", {"person_id": pid}, list[Role])
+                                         for pid in people))
+        roles = [role for found in results if found for role in found]
+        founders = {}
+        for role in roles:
+            if role.person.id in founder_ids:
+                founders.setdefault(role.person.id, role.person)
+        # Organisations where the founders or lead partner spent time, newest first.
+        orgs = {}
+        for role in sorted(roles, key=lambda r: (-(r.valid_until or as_of).toordinal(), r.org.id)):
+            if role.org.id not in skip_orgs and role.valid_since:
+                orgs.setdefault(role.org.id, role.org)
+        selected = list(orgs)[:self.settings.trust_org_limit]
+        previous = []
+        for role in sorted(roles, key=lambda r: (-(r.valid_until or as_of).toordinal(), r.org.id)):
+            if (role.person.id in founder_ids and role.kind == "founded" and role.org.id not in skip_orgs
+                    and role.org.id not in previous):
+                previous.append(role.org.id)
+        previous = previous[:self.settings.previous_company_limit]
+        org_people, previous_found = await asyncio.gather(
+            asyncio.gather(*(self._optional(retrieval, "entity_people", {"entity_id": oid}, list[Role]) for oid in selected)),
+            asyncio.gather(*(self._optional(retrieval, "company_rounds", {"company_id": cid, "limit": self.settings.previous_company_round_limit},
+                                            list[FundingRound], enabled=self.settings.previous_company_round_limit > 0)
+                             for cid in previous)))
+        previous_rounds = [funding for cid, found in zip(previous, previous_found) for funding in (found or [])
+                           if funding.company.id == cid and funding.sources]
+        headcounts = {}
+        for oid, found in zip(selected, org_people):
+            if found:
+                roles.extend(found)
+                count = len({r.person.id for r in found})
+                if count < PEOPLE_PAGE_LIMIT:
+                    headcounts[oid] = count
+        # Checked = founders' roles were read (so "no previous company" is a real answer).
+        previous_checked = any(found is not None for found in results) and all(found is not None for found in previous_found)
+        return roles, headcounts, [founders[pid] for pid in founder_ids if pid in founders], previous_rounds, previous_checked
+
     def get(self, run_id):
         self.cleanup()
         if run_id not in self.runs:
@@ -336,9 +472,12 @@ class Workflow:
         config, trace, founder, lead = self.settings, run.trace, run.profile, run.lead
         retrieval = Retrieval(self.provider, self.cache, config, trace, run.started, self.semaphore)
         cards, excluded, incomplete, notices, profiles = [], [], [], [], []
+        people_task = None
         discovered, profiled_count, graph_complete, graph_received = 0, 0, False, False
         candidate_rounds: dict[str, list[FundingRound]] = {}
         candidate_entities: dict[str, Entity] = {}
+        origin_rounds: dict[str, list[FundingRound]] = {}
+        origins: dict[str, set[str]] = {}
         state, error = "completed", None
         try:
             if founder.round.remaining_eur == 0:
@@ -346,7 +485,18 @@ class Workflow:
                 notices.append("No open allocation. Firm commitments meet or exceed the target; search stopped.")
             else:
                 as_of = run.confirmed_at.date()
-                graph = await retrieval.call("lead_graph", {"lead_id": lead.id, "lookback_months": config.lookback_months}, GraphSnapshot, "lead_graph")
+                startup_id = founder.startup.cala_entity_id
+                # Wave 0 (parallel): lead graph, startup people (founders), lead-partner
+                # search and your company's own funding rounds (existing investors).
+                graph, startup_people, partner_matches, startup_rounds = await asyncio.gather(
+                    retrieval.call("lead_graph", {"lead_id": lead.id, "lookback_months": config.lookback_months}, GraphSnapshot, "lead_graph"),
+                    self._optional(retrieval, "entity_people", {"entity_id": startup_id}, list[Role],
+                                   enabled=bool(startup_id and not founder.founder_person_ids)),
+                    self._optional(retrieval, "search_entities", {"query": founder.lead_partner_name or "", "kind": "person"},
+                                   list[Entity], enabled=bool(founder.lead_partner_name)),
+                    self._optional(retrieval, "company_rounds", {"company_id": startup_id or "", "limit": config.startup_round_limit},
+                                   list[FundingRound], enabled=bool(startup_id and config.startup_round_limit)),
+                )
                 graph_received, graph_complete = True, graph.complete
                 if graph.lead is not None:
                     if graph.lead.id != lead.id:
@@ -357,7 +507,7 @@ class Workflow:
                     run.lead = lead
                 if not graph.complete:
                     notices.append("Cala did not confirm complete graph coverage; available shared rounds are shown.")
-                # Only dated, sourced funding events with the exact confirmed lead qualify.
+                # Source 1: investors in dated, sourced funding events with the exact confirmed lead.
                 qualified = _qualified_rounds(graph.rounds, lead.id, months_before(as_of, config.lookback_months), as_of)
                 for funding in qualified:
                     for participation in funding.participants:
@@ -366,53 +516,46 @@ class Workflow:
                             continue
                         candidate_entities[investor.id] = investor
                         candidate_rounds.setdefault(investor.id, []).append(funding)
+                        origins.setdefault(investor.id, set()).add("lead_network")
+                # Source 2: your company's existing investors from its own identified rounds.
+                own_rounds = [funding for funding in deduplicate_rounds(startup_rounds or [])
+                              if funding.company.id == startup_id and funding.sources]
+                self._add_origin(own_rounds, "existing_investor", lead, candidate_entities, origin_rounds, origins)
+                if startup_id and startup_rounds is not None:
+                    trace.emit("founder_network", "Read your company's identified funding rounds for existing investors",
+                               count=len(own_rounds))
                 discovered = len(candidate_entities)
-                preliminary = []
-                for investor in candidate_entities.values():
-                    exclusion = exclusion_for(investor, founder, lead)
-                    if exclusion:
-                        excluded.append(exclusion)
-                    else:
-                        preliminary.append(investor)
-                preliminary.sort(key=lambda e: (
-                    -len({r.company.id for r in candidate_rounds[e.id]}),
-                    -max(r.event_date.toordinal() for r in candidate_rounds[e.id]),
-                    -sum(normalize_stage(r.stage) == founder.round.stage for r in candidate_rounds[e.id]),
-                    e.name.casefold(), e.id))
-                preliminary = preliminary[:config.preliminary_limit]
-                trace.emit("lead_graph", "Selected bounded preliminary candidates with identified shared rounds", count=len(preliminary))
-                cursor = 0
-                # Backfill only exclusions, respecting the same remaining time/call budget.
-                while len(profiles) < config.profile_limit and cursor < len(preliminary) and retrieval.remaining() > 0:
-                    batch = preliminary[cursor:cursor + config.profile_limit - len(profiles)]
-                    cursor += len(batch)
-
-                    async def profile_one(entity):
-                        try:
-                            profile = await retrieval.call("investor_profile", {"investor_id": entity.id, "lookback_months": 24}, InvestorProfile, "profiles")
-                            if profile.investor.id != entity.id:
-                                raise CalaError("invalid_profile", "Cala returned a different investor ID")
-                            return entity, profile, None
-                        except (CalaError, BudgetExceeded) as exc:
-                            return entity, None, exc
-
-                    for entity, profile, failure in await asyncio.gather(*(profile_one(e) for e in batch)):
-                        if failure:
-                            incomplete.append(entity)
-                            notices.append(f"Profile incomplete for {entity.name}; not rejected.")
-                            trace.emit("profiles", "Candidate profile unavailable; retained as incomplete", type="notice", count=1)
-                            continue
-                        profiled_count += 1
-                        exclusion = exclusion_for(profile.investor, founder, lead, profile)
-                        if exclusion:
-                            excluded.append(exclusion)
-                        else:
-                            profiles.append(profile)
-                    # A failed retrieval remains pending; do not spend the full budget chasing replacements.
-                    if incomplete:
-                        break
-                if cursor < len(preliminary) and len(profiles) < config.profile_limit:
-                    incomplete.extend(preliminary[cursor:])
+                preliminary = self._preliminary(candidate_entities, origins, candidate_rounds, origin_rounds,
+                                                founder, lead, excluded, config.preliminary_limit)
+                trace.emit("lead_graph", "Selected bounded preliminary candidates from your lead's network and cap table", count=len(preliminary))
+                lead_partner = _resolve_partner(founder.lead_partner_name, graph.people, partner_matches or [], lead)
+                if founder.lead_partner_name and lead_partner is None:
+                    notices.append("Lead partner could not be matched to a single Cala person; lead-partner loops are unknown.")
+                founder_ids = list(dict.fromkeys(founder.founder_person_ids or [
+                    role.person.id for role in (startup_people or []) if role.kind == "founded"]))
+                # Wave 1: founder/partner roles, then previous-company rounds and
+                # organisation people, alongside the first profiling batch.
+                people_task = asyncio.create_task(self._trust_people(
+                    retrieval, founder_ids, lead_partner, {lead.id, startup_id}, as_of))
+                reserve = config.founder_network_profile_slots if founder_ids else 0
+                profiled_count += await self._profile(retrieval, preliminary, max(1, config.profile_pool_limit - reserve),
+                                                      founder, lead, profiles, excluded, incomplete, notices, trace)
+                trust_roles, headcounts, founders, previous_rounds, previous_checked = await people_task
+                # Source 3: backers of the founders' previous companies.
+                before = set(candidate_entities)
+                self._add_origin(previous_rounds, "previous_company_backer", lead, candidate_entities, origin_rounds, origins)
+                if previous_rounds:
+                    trace.emit("founder_network", "Read the founders' previous companies' funding rounds for their backers",
+                               count=len(set(candidate_entities) - before))
+                discovered = len(candidate_entities)
+                profiled_ids = {p.investor.id for p in profiles} | {e.investor.id for e in excluded} | {e.id for e in incomplete}
+                backers = [e for e in self._preliminary({k: v for k, v in candidate_entities.items() if k not in profiled_ids},
+                                                        origins, candidate_rounds, origin_rounds, founder, lead, excluded,
+                                                        config.preliminary_limit)
+                           if "previous_company_backer" in origins[e.id]]
+                if backers and retrieval.remaining() > 0:
+                    profiled_count += await self._profile(retrieval, backers, config.profile_pool_limit - len(profiles),
+                                                          founder, lead, profiles, excluded, incomplete, notices, trace)
 
                 if profiles and self.semantic and getattr(self.semantic, "enabled", True):
                     trace.emit("assessments", "Assessing sector and portfolio overlap from retrieved Cala facts")
@@ -432,13 +575,62 @@ class Workflow:
                         notices.append("Drafting deadline reached; using sourced introduction templates.")
                 elif profiles:
                     notices.append("Semantic assessments disabled; sector and overlap remain unknown unless supplied in the snapshot.")
-                trace.emit("scoring", "Applying main-branch scoring, flags and deterministic ranking")
+                for role in startup_people or []:
+                    if role.kind == "founded" and role.person.id not in {p.id for p in founders}:
+                        founders.append(role.person)
+                if startup_id and not founder_ids:
+                    notices.append("No founder roles were found in Cala; founder-network loops are unknown.")
+                roles = [*graph.people, *(startup_people or []), *trust_roles,
+                         *(role for profile in profiles for role in profile.people)]
                 for profile in profiles:
-                    cards.append(score_candidate(profile, candidate_rounds[profile.investor.id], founder, lead, as_of))
-                cards = rank_candidates(cards)[:config.profile_limit]
+                    count = len({r.person.id for r in profile.people})
+                    if 0 < count < PEOPLE_PAGE_LIMIT:
+                        headcounts.setdefault(profile.investor.id, count)
+                # Industry and headquarters for the most-shared portfolio companies
+                # (Sector match / Country match). Bounded; missing ones stay "not checked".
+                evidence_rounds = graph.rounds + own_rounds + previous_rounds
+                company_counts: dict[str, int] = {}
+                for profile in profiles:
+                    ids = {r.company.id for r in candidate_rounds.get(profile.investor.id, []) + origin_rounds.get(profile.investor.id, [])
+                           + profile.rounds if r.company.id != startup_id}
+                    for company_id in ids:
+                        company_counts[company_id] = company_counts.get(company_id, 0) + 1
+                chosen = sorted(company_counts, key=lambda cid: (-company_counts[cid], cid))[:config.company_context_limit]
+                enriched = await asyncio.gather(*(self._optional(retrieval, "entity_metadata", {"entity_id": cid, "company": True},
+                                                                 Entity, enabled=retrieval.remaining() > 0) for cid in chosen))
+                context = rule_book.RuleContext(
+                    startup_id=startup_id, startup_rounds_checked=startup_rounds is not None,
+                    previous_companies_checked=bool(founders or founder_ids) and previous_checked,
+                    companies={entity.id: entity for entity in enriched if entity is not None})
+                if chosen:
+                    trace.emit("company_context", "Read industry and headquarters of portfolio companies", count=len(context.companies))
+                trace.emit("scoring", "Checking each investor against the rule set")
+                for profile in profiles:
+                    investor_id = profile.investor.id
+                    try:
+                        cards.append(score_candidate(
+                            profile, candidate_rounds.get(investor_id, []), founder, lead, as_of,
+                            known_rounds=evidence_rounds,
+                            origins=sorted(origins.get(investor_id, {"lead_network"})),
+                            origin_rounds=origin_rounds.get(investor_id, []), context=context))
+                    except ValueError:
+                        incomplete.append(profile.investor)  # no sourced evidence left after validation
+                startup = Entity(id=startup_id or f"startup:{run.id}", name=founder.startup.company_name)
+                trust_graph, _ = trust.build_graph(
+                    startup, founders, lead, lead_partner,
+                    [trust.Candidate(card.investor, card.shared_deals, card.origin_rounds) for card in cards],
+                    roles, headcounts, as_of)
+                confirmed = set(founder.confirmed_loop_ids)
+                for card in cards:
+                    card.trust, card.loops = trust.measure(trust_graph, founders, lead, lead_partner, card.investor, confirmed)
+                trace.emit("loops", "Measured trust loops through your company, founders, common contacts and the lead", type="loops",
+                           count=sum(len(card.loops) for card in cards))
+                for card in cards:
+                    finalize_card(card, founder, lead)
+                cards = ranker.rank(cards)[:config.profile_limit]
                 state = "partial" if incomplete or not graph_complete else ("completed" if cards else "no_match")
                 if not cards:
-                    notices.append(f"No eligible, fully profiled lead-connected candidate found within the {config.lookback_months}-month lookback. No generic investors added.")
+                    notices.append(f"No eligible, fully profiled candidate found in your lead's network or your founder network within the {config.lookback_months}-month lookback. No generic investors added.")
         except (BudgetExceeded, TimeoutError):
             state = "partial"
             notices.append("Processing deadline or request budget reached; returning available evidence. Unfinished profiles remain incomplete.")
@@ -451,6 +643,8 @@ class Workflow:
             error = {"code": "pipeline_error", "message": "The run could not be assembled; inspect server logs and retry."}
             import logging
             logging.getLogger(__name__).exception("Run %s failed", run.id)
+        if people_task is not None and not people_task.done():
+            people_task.cancel()
         finished = utcnow()
         run.result = RunResult(run_id=run.id, state=state, profile=founder, lead=lead,
                               confirmed_at=run.confirmed_at, finished_at=finished,
@@ -465,9 +659,25 @@ class Workflow:
                               processing_ms=round((time.monotonic() - run.started) * 1000, 2),
                               cala_calls=retrieval.calls, cache_hits=retrieval.cache_hits,
                               retrieval_timestamps=sorted(set(retrieval.timestamps)), error=error,
-                              scoring_version="main-1fed306",
+                              scoring_version=ranker.SCORING_VERSION,
                               allocation=build_allocation(cards, founder.round.remaining_eur))
         trace.emit("complete", f"Run finished: {state}", type="complete", count=len(cards))
+
+
+def _resolve_partner(name: str | None, lead_people: list[Role], matches: list[Entity], lead: Entity) -> Entity | None:
+    """Prefer a person Cala lists at the lead fund; otherwise one exact-name search match."""
+    if not name:
+        return None
+    wanted = normalized_name(name)
+    at_lead = {role.person.id: role.person for role in lead_people if role.org.id == lead.id}
+    by_id = [m for m in matches if m.id in at_lead]
+    if len(by_id) == 1:
+        return at_lead[by_id[0].id]
+    named = [p for p in at_lead.values() if normalized_name(p.name) == wanted]
+    if len(named) == 1:
+        return named[0]
+    exact = [m for m in matches if normalized_name(m.name) == wanted]
+    return exact[0] if len(exact) == 1 else None
 
 
 def _qualified_rounds(rounds, lead_id, start_date, end_date):

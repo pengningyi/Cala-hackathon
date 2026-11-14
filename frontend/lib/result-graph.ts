@@ -1,6 +1,6 @@
-import type { CandidateCard, Entity, FundingRound, RunResult, Source } from "./types";
+import type { CandidateCard, Entity, FundingRound, RunResult, Source, TrustLoop } from "./types";
 
-export type ResultNodeKind = "founder" | "lead" | "investor" | "round" | "company";
+export type ResultNodeKind = "founder" | "lead" | "investor" | "round" | "company" | "contact";
 
 export interface ResultGraphNode {
   id: string;
@@ -13,15 +13,20 @@ export interface ResultGraphNode {
   entity?: Entity;
   funding?: FundingRound;
   card?: CandidateCard;
+  /** For contact nodes: the trust loops that pass through this person. */
+  loops?: TrustLoop[];
 }
 
 export interface ResultGraphEdge {
   id: string;
-  kind: "founder_route" | "participation" | "issuer";
+  kind: "founder_route" | "participation" | "issuer" | "trust";
   source: string;
   target: string;
   eventId: string | null;
   sources: Source[];
+  /** Trust edges belong to one candidate's loop. */
+  investorId?: string;
+  confirmed?: boolean;
 }
 
 export interface ResultGraph {
@@ -94,7 +99,9 @@ export function buildResultGraph(result: RunResult): ResultGraph {
     id: "founder-route", kind: "founder_route", source: founderKey, target: leadKey,
     eventId: null, sources: [],
   });
-  const shownInvestors = cards.filter(card => fundingEvents.some(event => event.participants.some(person => person.investor.id === card.investor.id)));
+  // Founder-network investors have no shared event with the lead; they are shown through their loops.
+  const shownInvestors = cards.filter(card => fundingEvents.some(event => event.participants.some(person => person.investor.id === card.investor.id))
+    || (card.origins || []).some(origin => origin !== "lead_network") && (card.loops || []).length > 0);
   shownInvestors.forEach((card, index) => nodes.set(`investor:${card.investor.id}`, {
     id: `investor:${card.investor.id}`, kind: "investor", label: card.investor.name,
     x: 660, y: spread(index, shownInvestors.length, height), calaId: card.investor.id,
@@ -137,7 +144,38 @@ export function buildResultGraph(result: RunResult): ResultGraph {
       });
     }
   });
-  return { width, height, nodes: [...nodes.values()], edges: [...edges.values()], eventCount: fundingEvents.length, investorCount: shownInvestors.length };
+  // Trust loops: founder (or lead, for lead-partner loops) -> common contact -> investor.
+  // Contacts sit on the bottom row; edges are dashed because ties are unconfirmed public roles.
+  const contactLoops = new Map<string, { entity: Entity; loops: TrustLoop[] }>();
+  for (const card of shownInvestors) {
+    for (const loop of (card.loops || []).slice(0, 2)) {
+      if (!loop.contact) {
+        // Existing investor of your company: a direct, sourced edge from your company.
+        const direct = `trust:${card.investor.id}:${loop.id}:direct`;
+        edges.set(direct, { id: direct, kind: "trust", source: founderKey, target: `investor:${card.investor.id}`, eventId: null,
+          sources: graphSources(loop.hops.flatMap(hop => hop.sources)), investorId: card.investor.id, confirmed: true });
+        continue;
+      }
+      const entry = contactLoops.get(loop.contact.id) || { entity: loop.contact, loops: [] };
+      entry.loops.push(loop);
+      contactLoops.set(loop.contact.id, entry);
+      const contactKey = `contact:${loop.contact.id}`;
+      const fromKey = loop.kind === "lead_loop" ? leadKey : founderKey;
+      const personal = loop.hops.filter(hop => hop.edge_type !== "led" && hop.edge_type !== "person_at_fund");
+      const first = `trust:${card.investor.id}:${loop.id}:a`, second = `trust:${card.investor.id}:${loop.id}:b`;
+      edges.set(first, { id: first, kind: "trust", source: fromKey, target: contactKey, eventId: null,
+        sources: graphSources(personal.flatMap(hop => hop.sources)), investorId: card.investor.id, confirmed: loop.confirmed });
+      edges.set(second, { id: second, kind: "trust", source: contactKey, target: `investor:${card.investor.id}`, eventId: null,
+        sources: graphSources(loop.hops.flatMap(hop => hop.sources)), investorId: card.investor.id, confirmed: loop.confirmed });
+    }
+  }
+  [...contactLoops.entries()].slice(0, 6).forEach(([id, entry], index, all) => nodes.set(`contact:${id}`, {
+    id: `contact:${id}`, kind: "contact", label: entry.entity.name,
+    x: all.length <= 1 ? 480 : 240 + index * (400 / (all.length - 1)), y: height - 34, calaId: id,
+    sources: graphSources(entry.loops.flatMap(loop => loop.hops.flatMap(hop => hop.sources))), entity: entry.entity, loops: entry.loops,
+  }));
+  const kept = [...edges.values()].filter(edge => nodes.has(edge.source) && nodes.has(edge.target));
+  return { width, height, nodes: [...nodes.values()], edges: kept, eventCount: fundingEvents.length, investorCount: shownInvestors.length };
 }
 
 export function graphFocus(graph: ResultGraph, investorId: string | null): { nodes: Set<string>; edges: Set<string> } | null {
@@ -145,7 +183,8 @@ export function graphFocus(graph: ResultGraph, investorId: string | null): { nod
   if (!candidate) return null;
   const eventIds = new Set(graph.edges.filter(edge => edge.kind === "participation" && edge.source === candidate.id).map(edge => edge.eventId));
   const leadIds = new Set(graph.nodes.filter(node => node.kind === "lead").map(node => node.id));
-  const edges = graph.edges.filter(edge => edge.kind === "founder_route" || eventIds.has(edge.eventId)
+  const edges = graph.edges.filter(edge => edge.kind === "founder_route" || edge.kind === "trust" && edge.investorId === investorId
+    || edge.kind !== "trust" && eventIds.has(edge.eventId)
     && (edge.kind === "issuer" || edge.source === candidate.id || leadIds.has(edge.source)));
   return { nodes: new Set(edges.flatMap(edge => [edge.source, edge.target])), edges: new Set(edges.map(edge => edge.id)) };
 }

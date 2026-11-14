@@ -205,8 +205,71 @@ Flagged cards remain visible for review; the combined introduction request and
 allocation use eligible cards only. `counts` distinguishes shortlisted, flagged
 and returned profiles. Explicit founder/mandate exclusions remain separate.
 
-`scoring_version: "main-1fed306"` identifies main's deterministic scoring rules;
-unknown signals contribute zero, with completeness reported independently.
+`scoring_version: "rules-2026-11"`: one rule set (`app/rules.py`) is used for both
+scoring and ranking. Each rule is met (1 point), not met (0) or not checked (no
+Cala data; 0 points). `fit_score` is the number of rules met. `components` holds
+one entry per rule: `name` is the rule ID, `value` 1 or 0, `known` false when not
+checked, `group` one of Connection / Activity / Fit / Risk, plus an explanation
+and sources.
+
+| Rule | ID | Met when |
+| --- | --- | --- |
+| Lead co-investor | `lead_coinvestor` | At least one shared round with your lead |
+| Repeat partner | `repeat_partner` | Shared rounds with your lead in two or more companies |
+| Recent partner | `recent_partner` | A shared round with your lead in the last 24 months |
+| Your investor | `your_investor` | Invested in one of your company's own rounds |
+| Backed your founder | `backed_your_founder` | Backed a company a founder previously founded |
+| Warm path | `warm_path` | At least one trust loop links you to the investor |
+| Lead-closed path | `lead_closed_path` | A trust loop that also runs through your lead |
+| Recently active | `recently_active` | Invested in the last 12 months |
+| Stage match | `stage_match` | At least 25% of rounds with a known stage (dated in 60 months, or undated) are at your stage |
+| Sector match | `sector_match` | Backed a portfolio company whose Cala industry matches your sector |
+| Country match | `country_match` | Backed a portfolio company headquartered in your country |
+| No competitor | `no_competitor` | Has not backed a competitor you named (failing it also flags the card) |
+
+Ranking: most rules met, then most Connection rules met, then the most recent
+sourced round, then name and ID. Action: Your investor -> `reach_out_directly`;
+Warm path -> `reach_out_via_contact`; Lead co-investor -> `ask_lead_intro`;
+otherwise `skip` (shown as low priority). Rules dropped because Cala lacks the
+data (lead/follow roles, EUR ticket sizes, deployment counts) and the earlier v2
+signals (reciprocity, dry powder, momentum, next-round record, partner departure,
+set selection and composition) are no longer computed. Older saved results may
+carry `main-1fed306` or `v2-trust-2026-11`.
+
+Each card also has:
+
+| Field | Meaning |
+| --- | --- |
+| `trust` | Reachability 0-1 from public professional roles, separate from `fit_score`; `null` when no people data exists |
+| `loops` | Up to three `{id, kind, contact, hops[], strength, confirmed, label}`; kinds `known`, `one_contact`, `multi_contact`, `lead_loop` |
+| `recommended_action` | From the rules: `reach_out_directly`, `reach_out_via_contact`, `ask_lead_intro` or `skip` |
+| `action_contact` | The common contact for `reach_out_via_contact` |
+| `origins` | Why the investor is a candidate: `lead_network`, `existing_investor` (in your company's own rounds) and/or `previous_company_backer` |
+| `origin_rounds` | Up to four sourced rounds of your company or a founder's previous company that the investor joined |
+
+A shared round with the lead is no longer required. Candidates come from the
+lead's shared rounds, your company's own identified rounds (existing investors;
+action `reach_out_directly`, follow-up draft written to the investor) and the
+rounds of companies the founders previously founded. Founder-network cards with
+no shared round get a direct draft; the combined request to the lead lists only
+lead-connected cards.
+
+Trust loops have at most four edges, with your company and its founders as one
+home node: `existing_investor` (fund invested in your company), `previous_company`
+(founder founded a company the fund backed), `known` / `one_contact` /
+`multi_contact` (people), and `lead_loop` (from the lead partner). When the fund
+co-invested with your lead, `closes_through_lead` is true, the closing hops
+(`co_invested`, `led`) are included, and the loop's contribution is multiplied by
+`1 + co_invested strength`. Hop `edge_type` adds `invested_in` and `founded`.
+
+Loops come only from sourced, dated roles with overlapping validity windows and
+never imply a personal relationship. A founder can confirm a loop by rerunning
+with its ID in `profile.confirmed_loop_ids`. The optional `profile.lead_partner_name`
+enables lead-partner loops; `profile.founder_person_ids` skips the founder lookup.
+
+Up to eight profiled candidates are checked; the top five by the ranking order
+above are returned. Sector and Country match read industry and headquarters for
+up to six of the most-shared portfolio companies (`COMPANY_CONTEXT_LIMIT`).
 `allocation` contains `{investor_id, name, amount_eur, percentage, basis}` rows.
 Amounts are decimal strings, percentages refer to the open allocation, and a
 `Still open` row retains the remainder. Ticket estimates divide historical EUR
@@ -217,14 +280,22 @@ are not silently treated as EUR.
 The Cala call counter includes data-operation attempts and retries. MCP session
 initialization and cached `tools/list` schema discovery are protocol overhead.
 In the native adapter every introspection, entity retrieval and event-join data
-call is charged individually. The default graph joins at most three exact events
+call is charged individually. The default graph joins at most six exact events
 from a bounded relationship projection, and reports partial coverage. Candidate
 activity also uses independently sourced investor event observations; incomplete
 issuer profiles do not require invented company identities.
-The run uses at most four concurrent operations, ten preliminary candidates and
-five eligible detailed profiles; explicit exclusions may trigger bounded backfill.
-The 90-second deadline begins at confirmation; the final ten seconds are reserved
-for assessments and result assembly. Main's numerical score does not use semantic
+The run uses at most six concurrent operations, 72 Cala calls, fifteen preliminary
+candidates and eight detailed profiles, from which five are selected; explicit
+exclusions may trigger bounded backfill. People and fund edges ride on the same
+investor projections. Wave 0 runs the lead graph, startup founders and the
+lead-partner search in parallel; wave 1 runs candidate profiles alongside up to
+three person-role lookups and four organisation people lookups; your company's
+last three rounds are read in wave 0, and up to two previous companies' last two
+rounds each in wave 2, after which two reserved profile slots go to their backers. Budget exhaustion
+leaves the affected rules not checked and never blocks the shortlist. A `loops`
+progress event reports the measured loops before `complete`.
+The 120-second deadline begins at confirmation; the final ten seconds are reserved
+for assessments and result assembly. The numerical score does not use semantic
 ratings; missing numerical inputs contribute zero.
 
 ## Result conversation

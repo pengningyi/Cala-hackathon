@@ -4,7 +4,7 @@ Nov 14, 2026 · @Maria
 
 ## Overview
 
-A founder who already has a lead investor enters their round details and receives up to five relevant co-investors connected to that lead, with Cala evidence, considerations and a copyable introduction request. The processing target is 90 seconds after entity confirmation.
+A founder who already has a lead investor enters their round details and receives up to five relevant co-investors connected to that lead or to the founder's own network (existing investors and backers of the founders' previous companies), with Cala evidence, considerations and a copyable introduction request. The processing target is 90 seconds after entity confirmation.
 
 **Problem.** Once a lead commits, the founder still has to fill the rest of the round. They need to turn the lead's investment network into specific introduction requests while understanding stage, sector, participation-size and portfolio-overlap considerations.
 
@@ -29,7 +29,7 @@ A founder who already has a lead investor enters their round details and receive
 1. **Fill the form.** Enter the startup profile, round details, primary lead and optional investor statuses.
 2. **Confirm the lead and startup profile.** Show Cala matches with identifying details. The founder confirms the correct lead. Company lookup is optional; if the startup has no match, use the founder's manual profile.
 3. **Watch the agent run.** Start the processing timer after confirmation. Stream progress while retrieving and profiling candidates.
-4. **Read the result.** Show up to five lead-connected investors, ranked by introduction priority, with reasons, shared deals, considerations, source links and profile completeness. Zero to four results are valid; do not pad the list.
+4. **Read the result.** Show up to five investors connected to the lead or to the founder network, ranked by introduction priority, with reasons, shared deals, considerations, source links and profile completeness. Zero to four results are valid; do not pad the list.
 5. **Act.** Copy an individual introduction request or a combined request for the top two or three candidates. Already-contacted candidates get an appropriate follow-up suggestion instead of a fresh introduction request.
 6. **Adjust.** The founder may mark a candidate do-not-contact or correct their own startup profile and rerun.
 
@@ -76,7 +76,7 @@ P0 must work end to end by the demo. P1 is considered only after P0 passes its a
 | --- | --- | --- |
 | F1 | Input form, manual startup profile and status validation | P0 |
 | F2 | Resolve and confirm the lead; optionally match the startup in Cala | P0 |
-| F3 | Discover lead-connected co-investors, with shared-round and distinct-company counts | P0 |
+| F3 | Discover co-investors from the lead's shared rounds, the startup's own rounds and the founders' previous companies, with shared-round and distinct-company counts | P0 |
 | F4 | Generic sector/stage discovery in a separate list without implying a lead introduction path | P1 |
 | F5 | Bounded candidate profiles: recent activity, stage/sector/geography fit, historical roles, available ticket criteria and relevant portfolio companies | P0 |
 | F6 | Advisory considerations and explicit exclusions; no severity levels | P0 |
@@ -128,7 +128,8 @@ After resolution, pause until the founder confirms the lead and startup profile.
 - Cache real Cala responses with retrieval timestamps. Clearly label cached results in the trace and final result.
 - At the deadline, return available cards with a partial-result notice. Unfinished profiles are shown as pending/incomplete, not rejected.
 - If the writer cannot finish in time, generate a copyable template from the retrieved shared deals and founder fields.
-- If no eligible lead-connected candidate is found, show the search scope and a no-match state. Do not insert generic investors into the main shortlist.
+- A shared round with the lead is not required (changed 14 November 2026). Every card still needs sourced evidence: a shared funding event with the lead, or an identified round of the startup or of a founder's previous company that the investor joined.
+- If no eligible candidate is found in either network, show the search scope and a no-match state. Do not insert generic investors into the main shortlist.
 
 ## Architecture and development sequence
 
@@ -205,7 +206,7 @@ The 80%, 10% and 12-month consideration thresholds are adjustable constants, ind
 
 ## Output
 
-One result page contains the lead-connected shortlist, considerations on each card, explicit exclusions with reasons, and any partial/no-match notices.
+One result page contains the shortlist, considerations on each card, explicit exclusions with reasons, and any partial/no-match notices.
 
 ### Shortlist card (up to five investors)
 

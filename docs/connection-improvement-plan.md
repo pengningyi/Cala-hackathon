@@ -39,6 +39,15 @@ API; the current browser requires confirming both company identities. Scoring
 uses the explicitly selected main-branch rules and version, including zero for
 unknown inputs; the numerical weights remain 35/20/15/15/10/5.
 
+## Update: scoring v2 and trust loops (14 November 2026)
+
+Founder, previous-company and board paths are now computed inside the run, not
+as a separate on-demand action, using a raised budget (48 calls, 120 seconds).
+See `backend/app/trust.py`. Loops remain labelled unconfirmed public overlaps
+and only affect `trust` and the recommended action, never `fit_score`. The
+frozen 35/20/15/15/10/5 weights were replaced by scoring v2 (`backend/app/ranker.py`);
+paginated, stage-aware discovery is still not implemented.
+
 ## 1. Intended outcome
 
 Help a founder answer three questions for each potential investor:

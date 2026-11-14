@@ -108,11 +108,16 @@ def validate_result(result: RunResult, expected_lead_id, events, deadline, call_
         "within_processing_deadline": result.processing_ms <= deadline * 1000,
         "normalized_scores": all(0 <= card.fit_score <= 100 and 0 <= card.profile_completeness <= 1
                                  for card in result.candidates),
-        "same_identified_round": all(
-            card.shared_deals and all(
+        # A shared round with the lead is no longer required; founder-network cards
+        # must instead carry sourced rounds the investor joined.
+        "same_identified_round_or_founder_network": all(
+            (card.shared_deals and all(
                 deal.id and expected_lead_id in {p.investor.id for p in deal.participants}
                 and card.investor.id in {p.investor.id for p in deal.participants}
-                for deal in card.shared_deals)
+                for deal in card.shared_deals))
+            or (card.origin_rounds and all(
+                deal.sources and card.investor.id in {p.investor.id for p in deal.participants}
+                for deal in card.origin_rounds))
             for card in result.candidates),
         "sourced_dated_deals": all(
             deal.event_date is not None and deal.sources

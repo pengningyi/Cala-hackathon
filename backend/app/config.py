@@ -30,11 +30,24 @@ class Settings(BaseSettings):
     chat_max_concurrency: int = Field(default=2, ge=1, le=8)
 
     lookback_months: int = Field(default=60, ge=1, le=120)
-    preliminary_limit: int = Field(default=10, ge=1, le=10)
+    preliminary_limit: int = Field(default=15, ge=1, le=15)
+    # Shortlist size; the set is chosen from a larger profiled pool.
     profile_limit: int = Field(default=5, ge=1, le=5)
-    cala_concurrency: int = Field(default=4, ge=1, le=4)
-    cala_call_limit: int = Field(default=20, ge=1, le=100)
-    run_deadline_seconds: float = Field(default=90, gt=0, le=90)
+    profile_pool_limit: int = Field(default=8, ge=1, le=10)
+    graph_round_limit: int = Field(default=6, ge=1, le=10)
+    # Bounded person/organisation lookups for trust loops (each costs two calls).
+    trust_person_limit: int = Field(default=3, ge=0, le=6)
+    trust_org_limit: int = Field(default=4, ge=0, le=8)
+    cala_concurrency: int = Field(default=6, ge=1, le=6)
+    cala_call_limit: int = Field(default=72, ge=1, le=100)
+    # Portfolio companies read for industry and headquarters (Sector / Country match).
+    company_context_limit: int = Field(default=6, ge=0, le=10)
+    # Founder-network discovery: your company's past rounds and the founders' previous companies.
+    startup_round_limit: int = Field(default=3, ge=0, le=6)
+    previous_company_limit: int = Field(default=2, ge=0, le=4)
+    previous_company_round_limit: int = Field(default=2, ge=0, le=4)
+    founder_network_profile_slots: int = Field(default=2, ge=0, le=5)
+    run_deadline_seconds: float = Field(default=120, gt=0, le=120)
     assembly_reserve_seconds: float = Field(default=10, ge=0, le=10)
     cache_ttl_seconds: int = Field(default=3600, ge=0)
     cache_dir: Path = BACKEND_DIR / ".cache"
