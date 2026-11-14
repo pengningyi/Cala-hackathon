@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.coverage
+backend/.cache/
+backend/.runtime/
+backend/reports/*.json
+node_modules/
+.next/
+*.tsbuildinfo
+test-results/
+playwright-report/
+frontend/.qa/
+
+# Local reference skill archives
+/quick-public-deploy.skill
+/enfuce-style-ui.skill

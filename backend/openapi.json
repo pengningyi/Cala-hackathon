@@ -1,0 +1,1944 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "RoundCloser API",
+    "description": "Resolve a Cala lead, confirm the founder profile, and start a bounded co-investor search.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/cala/tools": {
+      "get": {
+        "summary": "Cala Tools",
+        "description": "Read-only tool discovery. Does not start or count as a confirmed run.",
+        "operationId": "cala_tools_api_integrations_cala_tools_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/resolve": {
+      "post": {
+        "summary": "Resolve",
+        "operationId": "resolve_api_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resolution"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs": {
+      "post": {
+        "summary": "Start Run",
+        "operationId": "start_run_api_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "summary": "Run Status",
+        "operationId": "run_status_api_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/result": {
+      "get": {
+        "summary": "Run Result",
+        "operationId": "run_result_api_runs__run_id__result_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Processing is still running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "summary": "Run Events",
+        "operationId": "run_events_api_runs__run_id__events_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "last-event-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/chat": {
+      "post": {
+        "summary": "Result Chat",
+        "operationId": "result_chat_api_runs__run_id__chat_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Assessment": {
+        "properties": {
+          "company_id": {
+            "type": "string",
+            "title": "Company Id"
+          },
+          "sector_fit": {
+            "type": "string",
+            "enum": [
+              "same",
+              "adjacent",
+              "unrelated",
+              "unknown"
+            ],
+            "title": "Sector Fit",
+            "default": "unknown"
+          },
+          "overlap": {
+            "type": "string",
+            "enum": [
+              "adjacent_business",
+              "possible_overlap",
+              "direct_substitute",
+              "none",
+              "unknown"
+            ],
+            "title": "Overlap",
+            "default": "unknown"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "label": {
+            "type": "string",
+            "const": "LLM assessment",
+            "title": "Label",
+            "default": "LLM assessment"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_id",
+          "rationale"
+        ],
+        "title": "Assessment"
+      },
+      "CandidateCard": {
+        "properties": {
+          "investor": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "fit_score": {
+            "type": "integer",
+            "title": "Fit Score"
+          },
+          "profile_completeness": {
+            "type": "number",
+            "title": "Profile Completeness"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "shared_round_count": {
+            "type": "integer",
+            "title": "Shared Round Count"
+          },
+          "shared_company_count": {
+            "type": "integer",
+            "title": "Shared Company Count"
+          },
+          "shared_deals": {
+            "items": {
+              "$ref": "#/components/schemas/FundingRound"
+            },
+            "type": "array",
+            "title": "Shared Deals"
+          },
+          "recent_rounds_12m": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Rounds 12M"
+          },
+          "most_recent_investment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Most Recent Investment"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreComponent"
+            },
+            "type": "array",
+            "title": "Components"
+          },
+          "considerations": {
+            "items": {
+              "$ref": "#/components/schemas/Consideration"
+            },
+            "type": "array",
+            "title": "Considerations"
+          },
+          "statuses": {
+            "items": {
+              "$ref": "#/components/schemas/InvestorStatus"
+            },
+            "type": "array",
+            "title": "Statuses"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/InvestorProfile"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "introduction",
+              "follow_up"
+            ],
+            "title": "Action"
+          },
+          "draft": {
+            "type": "string",
+            "title": "Draft"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "investor",
+          "fit_score",
+          "profile_completeness",
+          "explanation",
+          "shared_round_count",
+          "shared_company_count",
+          "shared_deals",
+          "recent_rounds_12m",
+          "most_recent_investment",
+          "components",
+          "considerations",
+          "statuses",
+          "profile",
+          "sources",
+          "action",
+          "draft"
+        ],
+        "title": "CandidateCard"
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage"
+      },
+      "ChatRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "History"
+          },
+          "selected_investor_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Investor Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ChatRequest"
+      },
+      "ChatResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 6000,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Citations"
+          },
+          "candidate_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Candidate Ids"
+          },
+          "model_used": {
+            "type": "boolean",
+            "title": "Model Used"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message",
+          "model_used"
+        ],
+        "title": "ChatResponse"
+      },
+      "Consideration": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "Cala fact",
+              "LLM assessment",
+              "Founder supplied"
+            ],
+            "title": "Basis"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "text",
+          "basis"
+        ],
+        "title": "Consideration"
+      },
+      "Entity": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "vc",
+              "angel",
+              "corporate_vc",
+              "company",
+              "unknown"
+            ],
+            "title": "Kind",
+            "default": "unknown"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Aliases"
+          },
+          "related_entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Related Entity Ids",
+            "description": "Only Cala-identified aliases or vehicles of the same investment organization. Never general graph neighbors."
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "Entity"
+      },
+      "Exclusion": {
+        "properties": {
+          "investor": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "investor",
+          "code",
+          "reason"
+        ],
+        "title": "Exclusion"
+      },
+      "FounderInput-Input": {
+        "properties": {
+          "founder_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Founder Name"
+          },
+          "startup": {
+            "$ref": "#/components/schemas/Startup"
+          },
+          "round": {
+            "$ref": "#/components/schemas/RoundInput-Input"
+          },
+          "lead_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Lead Name"
+          },
+          "investor_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/StatusEntry"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Investor Statuses"
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/Preferences"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "startup",
+          "round",
+          "lead_name"
+        ],
+        "title": "FounderInput"
+      },
+      "FounderInput-Output": {
+        "properties": {
+          "founder_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Founder Name"
+          },
+          "startup": {
+            "$ref": "#/components/schemas/Startup"
+          },
+          "round": {
+            "$ref": "#/components/schemas/RoundInput-Output"
+          },
+          "lead_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Lead Name"
+          },
+          "investor_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/StatusEntry"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Investor Statuses"
+          },
+          "preferences": {
+            "$ref": "#/components/schemas/Preferences"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "startup",
+          "round",
+          "lead_name"
+        ],
+        "title": "FounderInput"
+      },
+      "FundingRound": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "company": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "event_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date"
+          },
+          "event_date_precision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date Precision"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "company_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Country"
+          },
+          "total_amount_eur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Amount Eur"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/Participation"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "company"
+        ],
+        "title": "FundingRound"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InvestmentObservation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "event_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date"
+          },
+          "event_date_precision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date Precision"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "is_lead": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Lead"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "InvestmentObservation",
+        "description": "An identified investment event whose issuer profile may not be retrieved."
+      },
+      "InvestorProfile": {
+        "properties": {
+          "investor": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "rounds": {
+            "items": {
+              "$ref": "#/components/schemas/FundingRound"
+            },
+            "type": "array",
+            "title": "Rounds"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/InvestmentObservation"
+            },
+            "type": "array",
+            "title": "Observations"
+          },
+          "activity_window_complete": {
+            "type": "boolean",
+            "title": "Activity Window Complete",
+            "default": false
+          },
+          "ticket_criteria": {
+            "items": {
+              "$ref": "#/components/schemas/TicketCriterion"
+            },
+            "type": "array",
+            "title": "Ticket Criteria"
+          },
+          "mandates": {
+            "items": {
+              "$ref": "#/components/schemas/Mandate"
+            },
+            "type": "array",
+            "title": "Mandates"
+          },
+          "assessments": {
+            "items": {
+              "$ref": "#/components/schemas/Assessment"
+            },
+            "type": "array",
+            "title": "Assessments"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "investor"
+        ],
+        "title": "InvestorProfile"
+      },
+      "InvestorStatus": {
+        "type": "string",
+        "enum": [
+          "existing_shareholder",
+          "firm_committed",
+          "conditional_interest",
+          "already_approached",
+          "in_conversation",
+          "declined",
+          "do_not_contact"
+        ],
+        "title": "InvestorStatus"
+      },
+      "Mandate": {
+        "properties": {
+          "allowed_countries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Countries"
+          },
+          "allowed_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Stages"
+          },
+          "currently_applicable": {
+            "type": "boolean",
+            "title": "Currently Applicable",
+            "default": false
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Mandate"
+      },
+      "Participation": {
+        "properties": {
+          "investor": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "is_lead": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Lead"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "investor"
+        ],
+        "title": "Participation"
+      },
+      "Preferences": {
+        "properties": {
+          "include_angels": {
+            "type": "boolean",
+            "title": "Include Angels",
+            "default": true
+          },
+          "include_corporate_vcs": {
+            "type": "boolean",
+            "title": "Include Corporate Vcs",
+            "default": true
+          },
+          "investor_countries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Investor Countries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Preferences"
+      },
+      "Resolution": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/FounderInput-Output"
+          },
+          "lead_matches": {
+            "items": {
+              "$ref": "#/components/schemas/Entity"
+            },
+            "type": "array",
+            "title": "Lead Matches"
+          },
+          "startup_matches": {
+            "items": {
+              "$ref": "#/components/schemas/Entity"
+            },
+            "type": "array",
+            "title": "Startup Matches"
+          },
+          "resolver_ms": {
+            "type": "number",
+            "title": "Resolver Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "no_open_allocation": {
+            "type": "boolean",
+            "title": "No Open Allocation",
+            "default": false
+          },
+          "notices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "profile",
+          "lead_matches",
+          "resolver_ms",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "Resolution"
+      },
+      "ResolveRequest": {
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/FounderInput-Input"
+          },
+          "lookup_startup": {
+            "type": "boolean",
+            "title": "Lookup Startup",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "title": "ResolveRequest"
+      },
+      "RoundInput-Input": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": [
+              "seed",
+              "series_a"
+            ],
+            "title": "Stage"
+          },
+          "target_eur": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Target Eur"
+          },
+          "firm_commitments_eur": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Firm Commitments Eur"
+          },
+          "conditional_interest_eur": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Conditional Interest Eur",
+            "default": "0"
+          },
+          "lead_status": {
+            "type": "string",
+            "enum": [
+              "signed",
+              "firm_verbal",
+              "conditional"
+            ],
+            "title": "Lead Status"
+          },
+          "lead_ticket_eur": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Ticket Eur"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage",
+          "target_eur",
+          "firm_commitments_eur",
+          "lead_status"
+        ],
+        "title": "RoundInput"
+      },
+      "RoundInput-Output": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": [
+              "seed",
+              "series_a"
+            ],
+            "title": "Stage"
+          },
+          "target_eur": {
+            "type": "string",
+            "title": "Target Eur"
+          },
+          "firm_commitments_eur": {
+            "type": "string",
+            "title": "Firm Commitments Eur"
+          },
+          "conditional_interest_eur": {
+            "type": "string",
+            "title": "Conditional Interest Eur",
+            "default": "0"
+          },
+          "lead_status": {
+            "type": "string",
+            "enum": [
+              "signed",
+              "firm_verbal",
+              "conditional"
+            ],
+            "title": "Lead Status"
+          },
+          "lead_ticket_eur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Ticket Eur"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stage",
+          "target_eur",
+          "firm_commitments_eur",
+          "lead_status"
+        ],
+        "title": "RoundInput"
+      },
+      "RunResult": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "partial",
+              "no_match",
+              "no_open_allocation",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/FounderInput-Output"
+          },
+          "lead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Entity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Confirmed At"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Finished At"
+          },
+          "remaining_allocation_eur": {
+            "type": "string",
+            "title": "Remaining Allocation Eur"
+          },
+          "lookback_months": {
+            "type": "integer",
+            "title": "Lookback Months"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateCard"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "exclusions": {
+            "items": {
+              "$ref": "#/components/schemas/Exclusion"
+            },
+            "type": "array",
+            "title": "Exclusions"
+          },
+          "incomplete": {
+            "items": {
+              "$ref": "#/components/schemas/Entity"
+            },
+            "type": "array",
+            "title": "Incomplete"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "notices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notices"
+          },
+          "combined_draft": {
+            "type": "string",
+            "title": "Combined Draft"
+          },
+          "processing_ms": {
+            "type": "number",
+            "title": "Processing Ms"
+          },
+          "cala_calls": {
+            "type": "integer",
+            "title": "Cala Calls"
+          },
+          "cache_hits": {
+            "type": "integer",
+            "title": "Cache Hits"
+          },
+          "retrieval_timestamps": {
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": "array",
+            "title": "Retrieval Timestamps"
+          },
+          "scoring_version": {
+            "type": "string",
+            "title": "Scoring Version",
+            "default": "prd-v1"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "run_id",
+          "state",
+          "profile",
+          "lead",
+          "confirmed_at",
+          "finished_at",
+          "remaining_allocation_eur",
+          "lookback_months",
+          "candidates",
+          "exclusions",
+          "incomplete",
+          "counts",
+          "notices",
+          "combined_draft",
+          "processing_ms",
+          "cala_calls",
+          "cache_hits",
+          "retrieval_timestamps"
+        ],
+        "title": "RunResult"
+      },
+      "RunStatus": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "partial",
+              "no_match",
+              "no_open_allocation",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Confirmed At"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "result_url": {
+            "type": "string",
+            "title": "Result Url"
+          },
+          "events_url": {
+            "type": "string",
+            "title": "Events Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "confirmed_at",
+          "event_count",
+          "result_url",
+          "events_url"
+        ],
+        "title": "RunStatus"
+      },
+      "ScoreComponent": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weight": {
+            "type": "integer",
+            "title": "Weight"
+          },
+          "value": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Value"
+          },
+          "known": {
+            "type": "boolean",
+            "title": "Known"
+          },
+          "numerator": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numerator"
+          },
+          "denominator": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denominator"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "weight",
+          "value",
+          "known",
+          "explanation"
+        ],
+        "title": "ScoreComponent"
+      },
+      "Source": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Url"
+          },
+          "retrieved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Retrieved At"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": "Cala"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "url",
+          "retrieved_at"
+        ],
+        "title": "Source"
+      },
+      "StartRunRequest": {
+        "properties": {
+          "resolution_id": {
+            "type": "string",
+            "title": "Resolution Id"
+          },
+          "lead_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Id"
+          },
+          "profile_confirmed": {
+            "type": "boolean",
+            "const": true,
+            "title": "Profile Confirmed"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/FounderInput-Input"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "resolution_id",
+          "profile_confirmed",
+          "profile"
+        ],
+        "title": "StartRunRequest"
+      },
+      "Startup": {
+        "properties": {
+          "cala_entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cala Entity Id"
+          },
+          "company_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Company Name"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          },
+          "product_description": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Product Description"
+          },
+          "sector": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Sector"
+          },
+          "target_customer": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Target Customer"
+          },
+          "problem_solved": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Problem Solved"
+          },
+          "country": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "Country"
+          },
+          "known_competitors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Known Competitors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_name",
+          "product_description",
+          "sector",
+          "target_customer",
+          "problem_solved",
+          "country"
+        ],
+        "title": "Startup"
+      },
+      "StatusEntry": {
+        "properties": {
+          "investor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investor Id"
+          },
+          "investor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investor Name"
+          },
+          "statuses": {
+            "items": {
+              "$ref": "#/components/schemas/InvestorStatus"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Statuses"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "statuses"
+        ],
+        "title": "StatusEntry"
+      },
+      "TicketCriterion": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "published_initial_range",
+              "published_minimum_initial",
+              "historical_typical",
+              "historical_range"
+            ],
+            "title": "Kind"
+          },
+          "minimum_eur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Eur"
+          },
+          "maximum_eur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Eur"
+          },
+          "currently_applicable": {
+            "type": "boolean",
+            "title": "Currently Applicable",
+            "default": false
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "TicketCriterion"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

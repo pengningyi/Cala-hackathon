@@ -1,0 +1,276 @@
+/** Wire types for backend/app/models.py. Monetary decimals remain exact strings. */
+export type DecimalString = string;
+export type InvestorKind = "vc" | "angel" | "corporate_vc" | "company" | "unknown";
+export type InvestorStatus =
+  | "existing_shareholder"
+  | "firm_committed"
+  | "conditional_interest"
+  | "already_approached"
+  | "in_conversation"
+  | "declined"
+  | "do_not_contact";
+
+export interface Source {
+  url: string;
+  retrieved_at: string;
+  published_at: string | null;
+  label: string;
+}
+
+export interface Entity {
+  id: string;
+  name: string;
+  kind: InvestorKind;
+  country: string | null;
+  website: string | null;
+  description: string | null;
+  aliases: string[];
+  related_entity_ids: string[];
+  sources: Source[];
+}
+
+export interface Startup {
+  cala_entity_id?: string | null;
+  company_name: string;
+  website?: string | null;
+  product_description: string;
+  sector: string;
+  target_customer: string;
+  problem_solved: string;
+  country: string;
+  known_competitors: string[];
+}
+
+export interface RoundInput {
+  stage: "seed" | "series_a";
+  target_eur: DecimalString;
+  firm_commitments_eur: DecimalString;
+  conditional_interest_eur?: DecimalString;
+  lead_status: "signed" | "firm_verbal" | "conditional";
+  lead_ticket_eur?: DecimalString | null;
+}
+
+export interface StatusEntry {
+  investor_id?: string | null;
+  investor_name?: string | null;
+  statuses: InvestorStatus[];
+}
+
+export interface Preferences {
+  include_angels: boolean;
+  include_corporate_vcs: boolean;
+  investor_countries: string[];
+}
+
+export interface FounderInput {
+  founder_name?: string | null;
+  startup: Startup;
+  round: RoundInput;
+  lead_name: string;
+  investor_statuses: StatusEntry[];
+  preferences: Preferences;
+}
+
+export interface ResolveRequest {
+  profile: FounderInput;
+  lookup_startup: boolean;
+}
+
+export interface Resolution {
+  id: string;
+  profile: FounderInput;
+  lead_matches: Entity[];
+  startup_matches: Entity[];
+  resolver_ms: number;
+  created_at: string;
+  expires_at: string;
+  no_open_allocation: boolean;
+  notices: string[];
+}
+
+export interface StartRunRequest {
+  resolution_id: string;
+  lead_id: string | null;
+  profile_confirmed: true;
+  profile: FounderInput;
+}
+
+export interface Participation {
+  investor: Entity;
+  is_lead: boolean | null;
+}
+
+export interface FundingRound {
+  id: string;
+  company: Entity;
+  event_date: string | null;
+  event_date_precision: string | null;
+  stage: string | null;
+  sector: string | null;
+  company_country: string | null;
+  /** Total funding-event amount. This is never an individual investor ticket. */
+  total_amount_eur: DecimalString | null;
+  participants: Participation[];
+  sources: Source[];
+}
+
+export interface TicketCriterion {
+  kind:
+    | "published_initial_range"
+    | "published_minimum_initial"
+    | "historical_typical"
+    | "historical_range";
+  minimum_eur: DecimalString | null;
+  maximum_eur: DecimalString | null;
+  currently_applicable: boolean;
+  sources: Source[];
+}
+
+export interface Mandate {
+  allowed_countries: string[];
+  allowed_stages: string[];
+  currently_applicable: boolean;
+  sources: Source[];
+}
+
+export interface Assessment {
+  company_id: string;
+  sector_fit: "same" | "adjacent" | "unrelated" | "unknown";
+  overlap: "adjacent_business" | "possible_overlap" | "direct_substitute" | "none" | "unknown";
+  rationale: string;
+  label: "LLM assessment";
+  sources: Source[];
+}
+
+export interface InvestmentObservation {
+  id: string;
+  event_date: string | null;
+  event_date_precision: string | null;
+  stage: string | null;
+  is_lead: boolean | null;
+  sources: Source[];
+}
+
+export interface InvestorProfile {
+  investor: Entity;
+  rounds: FundingRound[];
+  observations: InvestmentObservation[];
+  activity_window_complete: boolean;
+  ticket_criteria: TicketCriterion[];
+  mandates: Mandate[];
+  assessments: Assessment[];
+  sources: Source[];
+}
+
+export interface GraphSnapshot {
+  lead?: Entity | null;
+  rounds: FundingRound[];
+  complete: boolean;
+}
+
+export interface ScoreComponent {
+  name: string;
+  weight: number;
+  value: number;
+  known: boolean;
+  numerator: number | null;
+  denominator: number | null;
+  explanation: string;
+  sources: Source[];
+}
+
+export interface Consideration {
+  code: string;
+  text: string;
+  basis: "Cala fact" | "LLM assessment" | "Founder supplied";
+  sources: Source[];
+}
+
+export interface Exclusion {
+  investor: Entity;
+  code: string;
+  reason: string;
+  sources: Source[];
+}
+
+export interface CandidateCard {
+  investor: Entity;
+  fit_score: number;
+  /** Fraction from 0 to 1, independent of fit_score. */
+  profile_completeness: number;
+  explanation: string;
+  shared_round_count: number;
+  shared_company_count: number;
+  shared_deals: FundingRound[];
+  recent_rounds_12m: number | null;
+  most_recent_investment: string | null;
+  components: ScoreComponent[];
+  considerations: Consideration[];
+  statuses: InvestorStatus[];
+  profile: InvestorProfile;
+  sources: Source[];
+  action: "introduction" | "follow_up";
+  draft: string;
+}
+
+export interface ProgressEvent {
+  id: number;
+  type: string;
+  at: string;
+  step: string;
+  message: string;
+  tool: string | null;
+  query: Record<string, unknown> | null;
+  count: number | null;
+  cached: boolean | null;
+}
+
+export type ResultState = "completed" | "partial" | "no_match" | "no_open_allocation" | "failed";
+
+export interface RunResult {
+  run_id: string;
+  state: ResultState;
+  profile: FounderInput;
+  lead: Entity | null;
+  confirmed_at: string;
+  finished_at: string;
+  remaining_allocation_eur: DecimalString;
+  lookback_months: number;
+  candidates: CandidateCard[];
+  exclusions: Exclusion[];
+  incomplete: Entity[];
+  counts: Record<string, number>;
+  notices: string[];
+  combined_draft: string;
+  processing_ms: number;
+  cala_calls: number;
+  cache_hits: number;
+  retrieval_timestamps: string[];
+  scoring_version: string;
+  error: Record<string, unknown> | null;
+}
+
+export interface RunStatus {
+  id: string;
+  state: "running" | ResultState;
+  confirmed_at: string;
+  event_count: number;
+  result_url: string;
+  events_url: string;
+}
+
+export interface Health {
+  status: "healthy";
+  cala_configured: boolean;
+  model_provider: "codex" | "openai_compatible" | "disabled";
+  storage: "in_memory";
+  api_version: string;
+}
+
+export interface ApiErrorBody {
+  error: {
+    code: string;
+    message: string;
+    details: unknown;
+  };
+}

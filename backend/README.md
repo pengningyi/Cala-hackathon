@@ -1,0 +1,79 @@
+# Backend
+
+Requires Python 3.11+. From this directory on Windows:
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-dev.txt
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+.venv/Scripts/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+On macOS/Linux use `.venv/bin/python` instead. Interactive API documentation is at
+<http://127.0.0.1:8000/docs>. `GET /api/health` reports whether Cala configuration
+is present; it does not claim successful authentication or live data readiness.
+
+Set `CALA_API_KEY` in `.env`; the default endpoint is `https://api.cala.ai/mcp/`
+and its documented key header is `X-API-KEY` ([Cala MCP documentation](https://docs.cala.ai/integrations/mcp)).
+`CALA_MCP_URL` and `CALA_TRANSPORT` can override the transport; `CALA_MCP_TOKEN`
+is optional bearer authentication for a custom proxy.
+The default native adapter discovers the server's schemas, then joins investor
+participations through exact funding-event UUIDs. `GET /api/integrations/cala/tools`
+exposes read-only schema discovery. `CALA_TOOL_MAPPING` is an optional override
+for another reviewed response contract; see [mapping instructions](config/README.md).
+Never commit `.env` or API keys.
+
+The default `MODEL_PROVIDER=codex` uses the installed Codex CLI and your existing
+login. `CODEX_EXECUTABLE` can be an absolute path if Codex is absent from PATH.
+It runs ephemeral, read-only structured assessment requests with external tools
+disabled. It receives only the founder profile and retrieved Cala facts; Cala
+credentials are excluded from its subprocess environment. A slow/unavailable model
+leaves semantic fit unknown and uses deterministic introduction templates.
+
+To use your own foundation model instead:
+
+```dotenv
+MODEL_PROVIDER=openai_compatible
+MODEL_BASE_URL=https://your-provider.example/v1
+MODEL_API_KEY=your-private-key
+MODEL_NAME=your-model
+```
+
+The provider must support `/chat/completions` and JSON-schema structured output.
+Native APIs using another protocol need a `SemanticProvider` adapter. No specific
+model is imposed. `MODEL_PROVIDER=disabled` keeps semantic assessments unknown.
+The model never sets scores, weights, entity identities or exclusion rules.
+The current writer uses sourced templates for every completed card. Semantic
+sector/overlap assessment uses the selected model when it completes in budget.
+The local CLI structured-output smoke test passed with network access. Verify
+login, network access and model latency on the machine running the service.
+
+Run verification from this directory:
+
+```powershell
+.venv/Scripts/python -m pytest -q
+```
+
+Automated pytest cases use explicitly synthetic providers. They do not spend model API credits
+or prove that the real Cala service works. The live workflow CLI uses a real
+server and accepts a JSON `ResolveRequest` (see [API contract](../docs/api.md)):
+
+```powershell
+.venv/Scripts/python scripts/run_profile.py --profile my-profile.json
+.venv/Scripts/python scripts/run_profile.py --profile one.json --profile two.json --profile three.json --runs 10 --report reports/live.json
+```
+
+The CLI records resolver latency separately, processing latency, request counts,
+cache hits, completeness and draft availability. It refuses ambiguous lead matches
+unless `--lead-id` identifies the founder's chosen result. Running multiple profiles
+with different resolved IDs can select each lead interactively. `--lead-id` is
+useful for a single already-reviewed lead. Review each lead in `/docs` before
+accepting its ID.
+
+Runs and confirmation records are held in memory for one hour by default; restart
+loses them. Real Cala response cache files live in `.cache/` and retain original
+retrieval timestamps. Both cache identity and TTL are configurable. Run with **one
+worker** so confirmation records and SSE replay share the same process. The initial
+service is intended for local development. The frontend consumes its HTTP/SSE API;
+public deployment is a separate step. The supplied deployment skill describes another
+repository, so its passwords, GPU requirements and application routes do not apply.
