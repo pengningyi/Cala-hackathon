@@ -12,6 +12,7 @@ import unicodedata
 from datetime import date
 from decimal import Decimal
 
+from .entity_metadata import country_name
 from .models import (
     CandidateCard, Consideration, Entity, Exclusion, FounderInput, FundingRound,
     InvestmentObservation, InvestorProfile, InvestorStatus, ScoreComponent, Source,
@@ -56,7 +57,13 @@ _REGIONS = {
 
 def normalize_country(value: str | None) -> str:
     norm = normalized_name(value or "")
-    return _COUNTRY_ALIASES.get(norm, norm)
+    norm = _COUNTRY_ALIASES.get(norm, norm)
+    canonical = country_name(norm)
+    return normalized_name(canonical) if canonical else norm
+
+
+_NORMALIZED_REGIONS = {region: {normalize_country(country) for country in countries}
+                       for region, countries in _REGIONS.items()}
 
 
 def normalize_stage(value: str | None) -> str:
@@ -72,7 +79,7 @@ def months_before(day: date, months: int) -> date:
 
 
 def _region(country: str) -> str | None:
-    return next((region for region, countries in _REGIONS.items() if country in countries), None)
+    return next((region for region, countries in _NORMALIZED_REGIONS.items() if country in countries), None)
 
 
 def unique_sources(sources: list[Source]) -> list[Source]:
@@ -87,6 +94,14 @@ def _sources(rounds: list[FundingRound] | list[InvestmentObservation]) -> list[S
 
 def _entity_names(investor: Entity) -> set[str]:
     return {normalized_name(name) for name in [investor.name, *investor.aliases]}
+
+
+def _entity_fact_sources(investor: Entity, field: str) -> list[Source]:
+    """Enriched facts require their own evidence; retain mapped-adapter compatibility."""
+    sources = getattr(investor, f"{field}_sources")
+    if sources or investor.metadata_status == "retrieved" or getattr(investor, f"{field}_basis"):
+        return unique_sources(sources)
+    return investor.sources
 
 
 def statuses_for(investor: Entity, founder: FounderInput) -> list[InvestorStatus]:
@@ -123,15 +138,17 @@ def exclusion_for(investor: Entity, founder: FounderInput, lead: Entity,
         return exclusion("lead_alias", "Cala identifies this entity as an alias or vehicle of the primary lead.",
                          alias_sources)
     preferences = founder.preferences
-    if investor.sources and investor.kind == "angel" and not preferences.include_angels:
-        return exclusion("investor_type_filter", "Founder excluded angel investors.", investor.sources)
-    if investor.sources and investor.kind == "corporate_vc" and not preferences.include_corporate_vcs:
-        return exclusion("investor_type_filter", "Founder excluded corporate VCs.", investor.sources)
-    if (preferences.investor_countries and investor.country and investor.sources
+    type_sources = _entity_fact_sources(investor, "kind")
+    country_sources = _entity_fact_sources(investor, "country")
+    if type_sources and investor.kind == "angel" and not preferences.include_angels:
+        return exclusion("investor_type_filter", "Founder excluded angel investors.", type_sources)
+    if type_sources and investor.kind == "corporate_vc" and not preferences.include_corporate_vcs:
+        return exclusion("investor_type_filter", "Founder excluded corporate VCs.", type_sources)
+    if (preferences.investor_countries and investor.country and country_sources
             and normalize_country(investor.country) not in {
                 normalize_country(country) for country in preferences.investor_countries}):
         return exclusion("investor_country_filter", "Investor country is outside the founder's explicit country filter.",
-                         investor.sources)
+                         country_sources)
     if profile:
         for criterion in profile.ticket_criteria:
             if (criterion.kind in ("published_minimum_initial", "published_initial_range")
@@ -338,8 +355,14 @@ def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
                       f"{non_lead}/{len(known_roles)} participations with known lead status were explicitly non-lead.",
                       _sources(known_roles), non_lead, len(known_roles))
 
-    geographies = [(item, normalize_country(item.company_country or item.company.country))
-                   for item in observed if item.company_country or item.company.country]
+    geographies = []
+    geography_sources = []
+    for item in observed:
+        country = item.company_country or item.company.country
+        evidence = item.sources if item.company_country else _entity_fact_sources(item.company, "country")
+        if country and evidence:
+            geographies.append((item, normalize_country(country)))
+            geography_sources.extend(evidence)
     founder_country = normalize_country(founder.startup.country)
     founder_region = _region(founder_country)
     if not geographies:
@@ -352,7 +375,7 @@ def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
         geo_value = 0.0
     geo = _component("geography_fit", geo_value,
                      "Prior country investment = 1; same predefined region = 0.5; other observed countries = 0.",
-                     _sources([item for item, _ in geographies]))
+                     geography_sources)
     components = [connection, activity, stage, sector, role, geo]
     considerations: list[Consideration] = []
 
@@ -391,11 +414,11 @@ def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
     statuses = statuses_for(investor, founder)
     if statuses:
         add("existing_relationship", "Founder supplied: " + ", ".join(s.value.replace("_", " ") for s in statuses) + ".", [], "Founder supplied")
-    if founder.preferences.investor_countries and not (investor.country and investor.sources):
+    if founder.preferences.investor_countries and not (investor.country and _entity_fact_sources(investor, "country")):
         add("country_unknown", "The founder's investor-country preference cannot be verified from sourced investor facts; confirm eligibility.",
             [], "Founder supplied")
     if ((not founder.preferences.include_angels or not founder.preferences.include_corporate_vcs)
-            and not (investor.kind != "unknown" and investor.sources)):
+            and not (investor.kind in ("vc", "angel", "corporate_vc") and _entity_fact_sources(investor, "kind"))):
         add("investor_type_unknown", "The founder's investor-type preference cannot be verified from sourced investor facts; confirm eligibility.",
             [], "Founder supplied")
     card = CandidateCard(

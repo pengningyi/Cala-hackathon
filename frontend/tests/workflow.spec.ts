@@ -62,7 +62,7 @@ test("real Cala search streams, copies follow-up drafts and reruns a do-not-cont
   await page.getByRole("button", { name: "Find my lead", exact: true }).click();
   const lead = page.locator(".entity-option").filter({ hasText: "aa87dde8-7dc3-4fc0-957f-143da6ddc0b7" });
   await expect(lead).toBeVisible();
-  await lead.getByRole("button").click();
+  await lead.locator(".entity-choice").click();
   await page.getByLabel("I confirm this is the correct lead and startup profile.").check();
   await page.getByRole("button", { name: "Find my co-investors", exact: true }).click();
   await expect(page.getByText("Search in progress", { exact: true })).toBeVisible();

@@ -699,6 +699,104 @@
             },
             "type": "array",
             "title": "Sources"
+          },
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
+          },
+          "headquarters_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headquarters Address"
+          },
+          "registered_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Address"
+          },
+          "country_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Basis"
+          },
+          "country_sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Country Sources"
+          },
+          "kind_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind Basis"
+          },
+          "kind_sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Kind Sources"
+          },
+          "metadata": {
+            "items": {
+              "$ref": "#/components/schemas/EntityMetadataProperty"
+            },
+            "type": "array",
+            "title": "Metadata"
+          },
+          "metadata_status": {
+            "type": "string",
+            "enum": [
+              "not_requested",
+              "retrieved",
+              "unavailable"
+            ],
+            "title": "Metadata Status",
+            "default": "not_requested"
+          },
+          "metadata_retrieved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Retrieved At"
           }
         },
         "additionalProperties": false,
@@ -708,6 +806,31 @@
           "name"
         ],
         "title": "Entity"
+      },
+      "EntityMetadataProperty": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "value": {
+            "title": "Value"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "EntityMetadataProperty"
       },
       "Exclusion": {
         "properties": {

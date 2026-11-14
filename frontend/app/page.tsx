@@ -9,6 +9,7 @@ import {
 import { ApiError, getHealth, getRunResult, resolveProfile, startRun, subscribeRunEvents } from "../lib/api";
 import type { CandidateCard, Entity, FounderInput, InvestorStatus, ProgressEvent, Resolution, RunResult, RunStatus, Source } from "../lib/types";
 import ResultsWorkspace from "../components/results-workspace";
+import EntityMetadata, { EntityIdentity } from "../components/entity-metadata";
 
 type Phase = "profile" | "confirm" | "running" | "results";
 type StatusRow = { investor_name: string; investor_id?: string; status: InvestorStatus };
@@ -147,7 +148,7 @@ function Candidate({ card, index, onExclude, busy, initiallyExpanded = false }: 
   const [expanded, setExpanded] = useState(initiallyExpanded);
   return <article className="candidate-card">
     <div className="candidate-heading"><div className="candidate-identity"><span className="candidate-rank mono">{String(index + 1).padStart(2, "0")}</span>
-      <div><h3>{card.investor.name}</h3><div className="meta-row"><span>{card.investor.kind === "unknown" ? "Investor type unknown" : label(card.investor.kind)}</span><span>·</span><span>{card.investor.country || "Country unknown"}</span></div></div></div>
+      <div><h3>{card.investor.name}</h3><div className="meta-row"><EntityIdentity entity={card.investor} /></div></div></div>
       <div className="fit-score"><strong>{card.fit_score}<span>/100</span></strong><small>Introduction priority</small></div></div>
     <p className="candidate-explanation">{card.explanation}</p>
     {card.statuses.length > 0 && <div className="status-chips">{card.statuses.map(status => <span className="chip" key={status}>{STATUS_LABELS[status]}</span>)}</div>}
@@ -163,7 +164,7 @@ function Candidate({ card, index, onExclude, busy, initiallyExpanded = false }: 
         <span className="consideration-basis">{item.basis}</span><p>{item.text}</p><Sources sources={item.sources} title="sources" /></li>)}</ul></div>}
     <div className="card-actions"><CopyButton text={card.draft} title={card.action === "follow_up" ? "Copy follow-up request" : "Copy introduction request"} className="button primary" />
       <button type="button" className="button text-button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? "Less detail" : "View fit & draft"}<ChevronDown size={14} className={expanded ? "rotated" : ""} /></button></div>
-    {expanded && <div className="candidate-details"><div className="detail-title"><h4>How the fit score is built</h4><span>Heuristic, not investment probability</span></div>
+    {expanded && <div className="candidate-details"><EntityMetadata entity={card.investor} /><div className="detail-title"><h4>How the fit score is built</h4><span>Heuristic, not investment probability</span></div>
       <div className="component-list">{card.components.map(item => <div className="component" key={item.name}>
         <div><strong>{label(item.name)}</strong><span className="mono">{item.known ? `${Math.round(item.value * 100)}%` : "Unknown"} <small>· weight {item.weight}</small></span></div>
         <div className="component-track"><span style={{ width: `${item.known ? item.value * 100 : 50}%` }} className={item.known ? "" : "neutral"} /></div>
@@ -339,6 +340,6 @@ export default function Home() {
 
 function EntityOption({ entity, selected, onSelect }: { entity: Entity; selected: boolean; onSelect: () => void }) {
   return <div className={`entity-option ${selected ? "selected" : ""}`}><button type="button" className="entity-choice" onClick={onSelect} aria-pressed={selected}>
-    <span className="selection-circle">{selected && <Check size={13} />}</span><div><strong>{entity.name}</strong><span>{entity.country || "Country unknown"} · {entity.kind === "unknown" ? "Type unknown" : label(entity.kind)}</span>{entity.description && <p>{entity.description}</p>}</div></button>
-    <div className="entity-evidence">{entity.website && <a href={entity.website} target="_blank" rel="noopener noreferrer">{new URL(entity.website).hostname}<ExternalLink size={11} /></a>}<Sources sources={entity.sources} title="sources" /><small className="mono">{entity.id}</small></div></div>;
+    <span className="selection-circle">{selected && <Check size={13} />}</span><div><strong>{entity.name}</strong><EntityIdentity entity={entity} />{entity.description && <p>{entity.description}</p>}</div></button>
+    <div className="entity-evidence">{entity.website && <a href={entity.website} target="_blank" rel="noopener noreferrer">{new URL(entity.website).hostname}<ExternalLink size={11} /></a>}<Sources sources={entity.sources} title="sources" /><small className="mono">{entity.id}</small></div><EntityMetadata entity={entity} /></div>;
 }

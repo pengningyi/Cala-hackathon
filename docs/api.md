@@ -47,6 +47,32 @@ Returns `Resolution`: `id`, the founder `profile`, Cala `lead_matches`, optional
 records include the Cala ID, name, type, country, description, website and sources
 where available. No company match is necessary for the manual startup flow.
 
+Native Cala matches are optionally enriched after the basic search, within the
+same resolver deadline and request budget. Enrichment requests all properties
+advertised by that entity's introspection schema, plus available geography and
+category relationships. A failed or timed-out metadata read preserves the basic
+match and adds a notice; it never changes the identity offered for confirmation.
+
+Entity metadata fields have backward-compatible defaults:
+
+| Field | Meaning |
+| --- | --- |
+| `entity_type` | Cala's legal/ontology type, such as `Company`, `Organization` or `Person`; separate from investor `kind` |
+| `headquarters_address`, `registered_address` | Available headquarters and registration addresses, kept distinct |
+| `country_basis`, `country_sources` | How the headquarters country was established, with field-specific source links and dates |
+| `kind_basis`, `kind_sources` | Evidence for an investor category; legal company type alone does not establish VC or corporate-VC status |
+| `metadata` | All returned property records as `{name, value, sources}`; values retain their JSON types and missing source links stay absent |
+| `metadata_status` | `not_requested`, `retrieved` or `unavailable`; `retrieved` describes the property read, not complete graph coverage |
+| `metadata_retrieved_at` | Actual retrieval time of the metadata response |
+
+Country extraction uses sourced country properties, headquarters relationships or
+an explicitly named country in the headquarters address. Registration location is
+never silently used as headquarters location. Website values without a scheme
+are normalized to HTTPS when they are valid web addresses. Unsupported investor
+categories remain unknown. New native country/category filters use the relevant
+field's evidence, rather than unrelated sources from another property. The same
+metadata parsing applies to investor profiles in final results.
+
 An investor-status entry has `investor_id` or `investor_name`, and a `statuses`
 array. Values: `existing_shareholder`, `firm_committed`, `conditional_interest`,
 `already_approached`, `in_conversation`, `declined`, `do_not_contact`. IDs take

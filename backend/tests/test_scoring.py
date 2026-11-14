@@ -214,6 +214,67 @@ def test_canonical_dedup_unions_evidence_and_conflicting_roles():
     assert next(p for p in merged[0].participants if p.investor.id == INVESTOR.id).is_lead is None
 
 
+def test_enriched_country_and_category_filters_require_field_specific_sources():
+    unrelated = Source(url="https://cala.example/investor/website", retrieved_at=SOURCE.retrieved_at)
+    investor = INVESTOR.model_copy(update={"country": "Germany", "kind": "angel",
+                                          "entity_type": "Person", "metadata_status": "retrieved",
+                                          "sources": [unrelated]})
+    context = founder(preferences=dict(include_angels=False, investor_countries=["Finland"]))
+    assert exclusion_for(investor, context, LEAD) is None
+    card = score_candidate(InvestorProfile(investor=investor), [funding()], context, LEAD, TODAY)
+    assert {item.code for item in card.considerations} >= {"country_unknown", "investor_type_unknown"}
+
+    country_known = investor.model_copy(update={"country_sources": [SOURCE], "country_basis": "headquarters_address"})
+    excluded = exclusion_for(country_known, context, LEAD)
+    assert excluded.code == "investor_country_filter"
+    assert excluded.sources == [SOURCE]
+
+    category_known = investor.model_copy(update={"kind_sources": [SOURCE], "kind_basis": "explicit_category"})
+    excluded = exclusion_for(category_known, context, LEAD)
+    assert excluded.code == "investor_type_filter"
+    assert excluded.sources == [SOURCE]
+
+
+def test_legal_company_type_does_not_confirm_an_investor_category():
+    investor = INVESTOR.model_copy(update={"kind": "company", "entity_type": "Company"})
+    context = founder(preferences=dict(include_corporate_vcs=False))
+    card = score_candidate(InvestorProfile(investor=investor), [funding()], context, LEAD, TODAY)
+    assert "investor_type_unknown" in {item.code for item in card.considerations}
+
+
+@pytest.mark.parametrize("canonical,preference", [
+    ("Korea, Republic of", "South Korea"), ("Viet Nam", "Vietnam"),
+    ("Taiwan, Province of China", "TW"), ("Moldova, Republic of", "Moldova"),
+])
+def test_iso_metadata_country_names_match_founder_filters_and_region_mapping(canonical, preference):
+    investor = INVESTOR.model_copy(update={"country": canonical, "country_sources": [SOURCE],
+                                          "metadata_status": "retrieved"})
+    context = founder(preferences=dict(investor_countries=[preference]))
+    assert exclusion_for(investor, context, LEAD) is None
+    # These observed countries still match the same predefined region as before ISO normalization.
+    context = founder(startup={**context.startup.model_dump(), "country": preference})
+    card = score_candidate(InvestorProfile(investor=investor), [funding(country=canonical)], context, LEAD, TODAY)
+    assert component(card, "geography_fit").value == 1
+    regional_peer = "France" if preference == "Moldova" else "Japan"
+    context = founder(startup={**context.startup.model_dump(), "country": regional_peer})
+    card = score_candidate(InvestorProfile(investor=investor), [funding(country=canonical)], context, LEAD, TODAY)
+    assert component(card, "geography_fit").value == .5
+
+
+def test_enriched_portfolio_geography_uses_the_headquarters_fields_own_evidence():
+    headquarters_source = Source(url="https://cala.example/company/headquarters", retrieved_at=SOURCE.retrieved_at)
+    event = funding(country=None)
+    event.company = event.company.model_copy(update={"country": "Finland", "metadata_status": "retrieved",
+                                                    "country_basis": "headquarters_address",
+                                                    "country_sources": [headquarters_source]})
+    card = score_candidate(InvestorProfile(investor=INVESTOR), [event], founder(), LEAD, TODAY)
+    assert component(card, "geography_fit").value == 1
+    assert component(card, "geography_fit").sources == [headquarters_source]
+    event.company = event.company.model_copy(update={"country_sources": [], "sources": [SOURCE]})
+    card = score_candidate(InvestorProfile(investor=INVESTOR), [event], founder(), LEAD, TODAY)
+    assert not component(card, "geography_fit").known
+
+
 def test_independent_observations_supply_activity_stage_and_role_without_fake_companies():
     shared = funding(when=date(2023, 1, 1))
     independent_source = Source(url="https://cala.example/investor/candidate/activity", retrieved_at=SOURCE.retrieved_at)

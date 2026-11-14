@@ -2,6 +2,9 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from app.cala import CalaError
 from app.cala_native import CalaNativeProvider, ToolPayload, _round
 from app.runtime import BudgetExceeded
 
@@ -139,3 +142,61 @@ def test_native_profiler_preserves_conflicting_observations_for_snapshot_merge()
 
     profile = asyncio.run(CalaNativeProvider().with_tool_caller(call).investor_profile("candidate", 24))
     assert [item.is_lead for item in profile.observations] == [None, True, False]
+
+
+def test_native_metadata_projects_all_advertised_fields_and_only_available_metadata_edges():
+    calls = []
+    fields = ["id", "name", "headquarters_address", "registered_address", "legal_name", "lei", "website"]
+
+    async def call(tool, args):
+        calls.append((tool, args))
+        if tool == "entity_introspection":
+            data = {"properties": fields, "relationships": {"outgoing": [
+                "HAS_HEADQUARTERS_IN", "PARTICIPATES_IN_FUNDING_ROUND", "OPERATES_IN_INDUSTRY"]}}
+        else:
+            data = {"id": "lead", "name": "Lead", "entity_type": "Company", "properties": {
+                "headquarters_address": prop("1 Road, Menlo Park, United States"),
+                "legal_name": prop("Synthetic Lead LP"), "lei": prop("Synthetic LEI"),
+                "website": prop("lead.example.test")}}
+        return ToolPayload(data=data, retrieved_at=datetime.now(timezone.utc))
+
+    entity = asyncio.run(CalaNativeProvider().with_tool_caller(call).entity_metadata("lead"))
+    assert len(calls) == 2
+    projection = calls[1][1]
+    assert projection["properties"] == fields
+    assert set(projection["relationships"]["outgoing"]) == {"HAS_HEADQUARTERS_IN", "OPERATES_IN_INDUSTRY"}
+    assert entity.country == "United States" and entity.metadata_status == "retrieved"
+    assert entity.entity_type == "Company" and entity.kind == "unknown"
+    assert str(entity.website) == "https://lead.example.test/"
+    assert next(item for item in entity.metadata if item.name == "lei").value == "Synthetic LEI"
+
+
+def test_native_investor_profile_projects_full_metadata_without_extra_calls():
+    calls = []
+
+    async def call(tool, args):
+        calls.append((tool, args))
+        if tool == "entity_introspection":
+            data = {"properties": ["name", "legal_name", "headquarters_address", "investor_type"],
+                    "relationships": {"outgoing": ["PARTICIPATES_IN_FUNDING_ROUND", "HAS_HEADQUARTERS_IN"]}}
+        else:
+            data = {"id": "candidate", "name": "Candidate", "entity_type": "Organization", "properties": {
+                "legal_name": prop("Synthetic Candidate"), "investor_type": prop("VC"),
+                "headquarters_address": prop("1 Road, Helsinki, Finland")}}
+        return ToolPayload(data=data, retrieved_at=datetime.now(timezone.utc))
+
+    profile = asyncio.run(CalaNativeProvider().with_tool_caller(call).investor_profile("candidate", 24))
+    assert len(calls) == 2
+    assert calls[1][1]["properties"] == ["name", "legal_name", "headquarters_address", "investor_type"]
+    assert "PARTICIPATES_IN_FUNDING_ROUND" in calls[1][1]["relationships"]["outgoing"]
+    assert profile.investor.country == "Finland" and profile.investor.kind == "vc"
+    assert profile.investor.metadata_status == "retrieved"
+
+
+def test_native_metadata_rejects_identity_mismatch():
+    async def call(tool, args):
+        data = {"properties": ["name"]} if tool == "entity_introspection" else {"id": "other", "name": "Other"}
+        return ToolPayload(data=data, retrieved_at=datetime.now(timezone.utc))
+
+    with pytest.raises(CalaError, match="different entity"):
+        asyncio.run(CalaNativeProvider().with_tool_caller(call).entity_metadata("lead"))

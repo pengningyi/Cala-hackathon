@@ -14,10 +14,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, Callable
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError as SchemaValidationError
-from pydantic import BaseModel, ConfigDict, HttpUrl, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict
 
 from .cala import CalaError, CalaMCPProvider
-from .models import Entity, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation, Source
+from .entity_metadata import date_value as _date, parse_entity as _entity, property_value as _value, sources as _sources
+from .models import Entity, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation
 from .runtime import BudgetExceeded
 
 
@@ -28,75 +29,6 @@ class ToolPayload(BaseModel):
 
 
 ToolCaller = Callable[[str, dict[str, Any]], Awaitable[ToolPayload]]
-
-
-def _date(value: Any) -> date | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return date.fromisoformat(value[:10])
-    except ValueError:
-        return None
-
-
-def _value(data: dict, key: str, default=None):
-    value = data.get("properties", {}).get(key, default)
-    return value.get("value", default) if isinstance(value, dict) else value
-
-
-def _sources(data: Any, retrieved_at: datetime) -> list[Source]:
-    """Use returned public source links only, retaining publication dates."""
-    sources: dict[str, Source] = {}
-
-    def visit(value):
-        if isinstance(value, list):
-            for item in value:
-                visit(item)
-        elif isinstance(value, dict):
-            for item in value.get("sources", []):
-                document = item.get("document")
-                url = document.get("endpoint") if isinstance(document, dict) else document
-                url = url or item.get("url")
-                if not isinstance(url, str):
-                    continue
-                try:
-                    source = Source(url=url, retrieved_at=retrieved_at,
-                                    published_at=_date(item.get("date") or item.get("published_time")),
-                                    label=str(item.get("name") or "Cala"))
-                except ValidationError:
-                    continue
-                sources[str(source.url)] = source
-            for key, child in value.items():
-                if key != "sources":
-                    visit(child)
-
-    visit(data)
-    return list(sources.values())
-
-
-def _entity(data: dict[str, Any], retrieved_at: datetime, *, company: bool = False) -> Entity:
-    identifier = data.get("id") or _value(data, "id")
-    name = data.get("name") or _value(data, "name")
-    if not identifier or not name:
-        raise CalaError("cala_entity_invalid", "Cala entity lacks its stable identity")
-    aliases = _value(data, "aliases", [])
-    if not isinstance(aliases, list):
-        aliases = []
-    website = _value(data, "website")
-    try:
-        website = TypeAdapter(HttpUrl).validate_python(website) if website else None
-    except ValidationError:
-        website = None
-    country = _value(data, "country") or _value(data, "country_name")
-    for relation in data.get("relationships", {}).get("outgoing", {}).get("HAS_HEADQUARTERS_IN", []):
-        if relation.get("entity_type") == "Country":
-            country = relation.get("name")
-            break
-    kind = "company" if company else ("angel" if data.get("entity_type") == "Person" else "unknown")
-    description = data.get("description") or _value(data, "description")
-    return Entity(id=str(identifier), name=str(name), kind=kind, country=country if isinstance(country, str) else None,
-                  description=description if isinstance(description, str) else None, website=website,
-                  aliases=[str(alias) for alias in aliases], sources=_sources(data, retrieved_at))
 
 
 def _months_before(day: date, months: int) -> date:
@@ -219,6 +151,11 @@ class CalaNativeProvider:
             raise CalaError("cala_response_invalid", "Cala entity_search did not return entities")
         return [_entity(item, response.retrieved_at, company=kind == "company") for item in raw]
 
+    async def entity_metadata(self, entity_id: str, company: bool = False) -> Entity:
+        """Retrieve available properties without expanding unrelated graph paths."""
+        response, _ = await self._entity_projection(entity_id, investment_edges=False)
+        return _entity(response.data, response.retrieved_at, company=company, metadata_retrieved=True)
+
     async def lead_graph(self, lead_id: str, lookback_months: int) -> GraphSnapshot:
         response, _ = await self._investor(lead_id)
         today = datetime.now(timezone.utc).date()
@@ -260,11 +197,11 @@ class CalaNativeProvider:
         # Relation projections are deliberately bounded, and Cala does not return
         # an exhaustive-coverage declaration. A small page is not proof of coverage.
         return GraphSnapshot(rounds=rounds, complete=False,
-                             lead=_entity(response.data, response.retrieved_at))
+                             lead=_entity(response.data, response.retrieved_at, metadata_retrieved=True))
 
     async def investor_profile(self, investor_id: str, lookback_months: int) -> InvestorProfile:
         response, _ = await self._investor(investor_id)
-        investor = _entity(response.data, response.retrieved_at)
+        investor = _entity(response.data, response.retrieved_at, metadata_retrieved=True)
         if investor.id != investor_id:
             raise CalaError("cala_entity_mismatch", "Cala returned a different investor")
         today = datetime.now(timezone.utc).date()
@@ -297,19 +234,25 @@ class CalaNativeProvider:
                                sources=_sources(response.data, response.retrieved_at))
 
     async def _investor(self, investor_id: str) -> tuple[ToolPayload, dict]:
-        schema = (await self._call("entity_introspection", {"entity_id": investor_id})).data
-        properties = [name for name in ("id", "name", "description", "website", "aliases", "country", "country_name")
-                      if name in schema.get("properties", [])]
+        return await self._entity_projection(investor_id, investment_edges=True)
+
+    async def _entity_projection(self, entity_id: str, *, investment_edges: bool) -> tuple[ToolPayload, dict]:
+        schema = (await self._call("entity_introspection", {"entity_id": entity_id})).data
+        if not isinstance(schema, dict):
+            raise CalaError("cala_schema_invalid", "Cala entity schema was not an object")
+        # Introspection, rather than a hand-picked field list, controls the read.
+        properties = list(dict.fromkeys(name for name in schema.get("properties", []) if isinstance(name, str)))
         available = schema.get("relationships", {}).get("outgoing", [])
-        relationships = {name: {"limit": 20} for name in (
-            "PARTICIPATES_IN_FUNDING_ROUND", "PARTICIPATES_IN_CORPORATE_EVENT", "HAS_HEADQUARTERS_IN",
-        ) if name in available}
-        args = {"entity_id": investor_id, "properties": properties}
+        names = ["HAS_HEADQUARTERS_IN", "IS_REGISTERED_IN", "OPERATES_IN_INDUSTRY"]
+        if investment_edges:
+            names.extend(["PARTICIPATES_IN_FUNDING_ROUND", "PARTICIPATES_IN_CORPORATE_EVENT"])
+        relationships = {name: {"limit": 20} for name in names if name in available}
+        args = {"entity_id": entity_id, "properties": properties}
         if relationships:
             args["relationships"] = {"outgoing": relationships}
         response = await self._call("entity_retrieval", args)
-        if not isinstance(response.data, dict) or response.data.get("id") != investor_id:
-            raise CalaError("cala_entity_mismatch", "Cala returned a different investor")
+        if not isinstance(response.data, dict) or response.data.get("id") != entity_id:
+            raise CalaError("cala_entity_mismatch", "Cala returned a different entity")
         return response, schema
 
     async def _read_round(self, event_id: str) -> FundingRound | None:

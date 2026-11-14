@@ -19,6 +19,12 @@ class Source(Model):
     label: str = "Cala"
 
 
+class EntityMetadataProperty(Model):
+    name: str
+    value: Any
+    sources: list[Source] = Field(default_factory=list)
+
+
 class Entity(Model):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -29,6 +35,16 @@ class Entity(Model):
     aliases: list[str] = Field(default_factory=list)
     related_entity_ids: list[str] = Field(default_factory=list, description="Only Cala-identified aliases or vehicles of the same investment organization. Never general graph neighbors.")
     sources: list[Source] = Field(default_factory=list)
+    entity_type: str | None = None
+    headquarters_address: str | None = None
+    registered_address: str | None = None
+    country_basis: str | None = None
+    country_sources: list[Source] = Field(default_factory=list)
+    kind_basis: str | None = None
+    kind_sources: list[Source] = Field(default_factory=list)
+    metadata: list[EntityMetadataProperty] = Field(default_factory=list)
+    metadata_status: Literal["not_requested", "retrieved", "unavailable"] = "not_requested"
+    metadata_retrieved_at: datetime | None = None
 
 
 class Startup(Model):

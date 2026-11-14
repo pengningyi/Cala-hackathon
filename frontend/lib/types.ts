@@ -17,6 +17,12 @@ export interface Source {
   label: string;
 }
 
+export interface EntityMetadataProperty {
+  name: string;
+  value: unknown;
+  sources: Source[];
+}
+
 export interface Entity {
   id: string;
   name: string;
@@ -27,6 +33,16 @@ export interface Entity {
   aliases: string[];
   related_entity_ids: string[];
   sources: Source[];
+  entity_type?: string | null;
+  headquarters_address?: string | null;
+  registered_address?: string | null;
+  country_basis?: string | null;
+  country_sources?: Source[];
+  kind_basis?: string | null;
+  kind_sources?: Source[];
+  metadata?: EntityMetadataProperty[];
+  metadata_status?: "not_requested" | "retrieved" | "unavailable";
+  metadata_retrieved_at?: string | null;
 }
 
 export interface Startup {

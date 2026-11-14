@@ -13,16 +13,18 @@ real-response caching, budgets, and configurable model providers.
 
 Validation completed locally:
 
-- 82 backend tests passed, including lead-alias preservation and sourced result-chat answers.
+- 118 backend tests passed, including metadata provenance, resolver fallback,
+  lead-alias preservation and sourced result-chat answers.
 - Ten real Cala API runs across three hypothetical founder profiles passed budget,
   timing, source, shared-event, draft and SSE assertions.
 - A supplemental complete API run produced five validated Codex assessments in
   17.938 seconds with cached real Cala responses.
 - Strict frontend TypeScript and an optimized Next.js production build passed.
-- Ten pure graph regression checks and three browser tests passed. Browser checks
+- Ten pure graph regression checks and five browser tests passed. Browser checks
   cover the responsive Cala testing profile, no allocation with zero Cala calls,
   and a real Seedcamp flow with progress, graph selection/zoom, sourced chat,
-  copied provisional follow-up text and a do-not-contact rerun.
+  copied provisional follow-up text, a do-not-contact rerun, full metadata with
+  dated field sources, and selectable matches when metadata is unavailable.
 - Desktop/mobile screenshots were inspected; text size, contrast, labels and
   responsive layout were corrected based on those checks.
 
@@ -41,6 +43,18 @@ edges use identified Cala funding events; the current founder-to-lead route is
 dashed and labelled founder-supplied. Mobile screens stack the same panels.
 The current chat is a local evidence assistant for saved results, rather than an
 open-ended model conversation; it can explain, compare and show existing drafts.
+
+Native entity resolution now enriches basic search matches with all properties
+advertised by Cala's entity schema and available geography/category relationships.
+The same parser supplies full investor-profile metadata. Headquarters country,
+registration address, legal entity type and investor category remain distinct;
+unknown or conflicting facts stay unknown. Field-specific sources support
+geography and category filters. Optional enrichment shares the resolver budget
+and preserves basic matches when details fail or time out. Confirmation and
+candidate details expose the returned properties and their dated sources.
+The live default Cala lookup verified United States / VC for the main Lightspeed
+entity and Mauritius / VC for the two Mauritius vehicles, plus desktop/mobile
+layout and the normalized website link.
 
 Credentials live only in the ignored backend `.env`. GitHub users configure their
 own Cala key and either local Codex login or an OpenAI-compatible model endpoint,

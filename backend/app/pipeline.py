@@ -79,6 +79,8 @@ class Workflow:
                     startups = await retrieval.call("search_entities", {"query": request.profile.startup.company_name, "kind": "company"}, list[Entity], "resolver")
                 except Exception:
                     notices.append("Optional startup lookup unavailable; confirm the manual startup profile.")
+            if callable(getattr(self.provider, "entity_metadata", None)) and (leads or startups):
+                leads, startups = await self._resolve_metadata(retrieval, leads, startups, notices)
             if not leads:
                 notices.append("No Cala lead match found. Refine the lead name before starting a run.")
         else:
@@ -90,6 +92,66 @@ class Workflow:
                                 no_open_allocation=request.profile.round.remaining_eur == 0, notices=notices)
         self.resolutions[resolution.id] = resolution
         return resolution
+
+    async def _resolve_metadata(self, retrieval: Retrieval, leads: list[Entity],
+                                startups: list[Entity], notices: list[str]):
+        """Enrich offered identities without losing a successful basic lookup.
+
+        Metadata shares the resolver's existing raw-call and time limits. Each
+        completed response is retained immediately, so cancellation of a slow
+        sibling never erases already-retrieved details or the original matches.
+        """
+        leads = [item.model_copy(deep=True) for item in leads]
+        startups = [item.model_copy(deep=True) for item in startups]
+        jobs = []
+        for matches, company in ((leads, False), (startups, True)):
+            for index, entity in enumerate(matches):
+                matches[index] = entity.model_copy(update={"metadata_status": "unavailable"})
+                jobs.append((matches, index, entity, company))
+
+        cursor = 0
+
+        async def worker():
+            nonlocal cursor
+            while cursor < len(jobs) and retrieval.remaining() > 0:
+                # No await between selecting a job and advancing the cursor.
+                matches, index, original, company = jobs[cursor]
+                cursor += 1
+                try:
+                    enriched = await retrieval.call("entity_metadata", {
+                        "entity_id": original.id, "company": company,
+                    }, Entity, "resolver_metadata")
+                    if enriched.id != original.id:
+                        continue  # A different identity can never become an offered match.
+                    matches[index] = enriched.model_copy(update={
+                        "description": enriched.description or original.description,
+                        "website": enriched.website or original.website,
+                        "metadata_status": "retrieved",
+                    })
+                except Exception:
+                    # Metadata is optional. Preserve the original identity and
+                    # allow the founder to confirm it even when details fail.
+                    continue
+
+        tasks = [asyncio.create_task(worker()) for _ in range(min(
+            self.settings.cala_concurrency, len(jobs)))]
+        try:
+            # Leave a small scheduling margin to return the preserved resolution
+            # instead of allowing metadata to consume the whole request window.
+            async with asyncio.timeout(max(0, retrieval.remaining() - 0.05)):
+                await asyncio.gather(*tasks)
+        except TimeoutError:
+            pass
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        if any(item.metadata_status != "retrieved" for item in [*leads, *startups]):
+            notices.append("Some Cala match metadata was unavailable within the lookup limits. "
+                           "Basic matches remain available; missing fields stay unknown.")
+        return leads, startups
 
     def start(self, request: StartRunRequest):
         self.cleanup()
