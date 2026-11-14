@@ -101,8 +101,8 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
             <span className="workspace-rank mono">{String(index + 1).padStart(2, "0")}</span><span className="workspace-investor-name"><strong title={card.investor.name}>{card.investor.name}</strong>{card.review_status === "flagged" && <span className="workspace-review-status">Needs review</span>}
               {(card.origins || []).filter(origin => origin !== "lead_network").map(origin => <span key={origin} className={`workspace-origin-chip origin-${origin}`}>{ORIGIN_LABELS[origin]}</span>)}
               <small>{card.shared_round_count} shared {card.shared_round_count === 1 ? "round" : "rounds"}{rules ? "" : ` · ${Math.round(card.profile_completeness * 100)}% complete`}{card.action === "follow_up" ? " · Follow-up" : ""}</small>
-              {card.recommended_action && <span className={`workspace-action-chip action-${card.recommended_action}`} title={card.trust == null ? "Trust unknown: no people data" : `Trust ${card.trust.toFixed(2)} from public professional roles`}>
-                {ACTION_LABELS[card.recommended_action]}{card.action_contact ? ` · ${card.action_contact.name}` : ""}{card.trust != null ? ` · trust ${card.trust.toFixed(2)}` : ""}</span>}</span>
+              {card.recommended_action && <span className={`workspace-action-chip action-${card.recommended_action}`}>
+                {ACTION_LABELS[card.recommended_action]}{card.action_contact ? ` · ${card.action_contact.name}` : ""}</span>}</span>
             {rules ? <span className="workspace-investor-score workspace-rules-score" title="Number of ranking rules this investor meets">{card.fit_score}<small>{card.fit_score === 1 ? "rule met" : "rules met"}</small></span>
               : <span className="workspace-investor-score" title="Introduction priority, not an investment probability">{card.fit_score}<small>/100</small></span>}</button>
           <CopyRequest text={card.draft} label={`Copy request for ${card.investor.name}`} compact />

@@ -143,7 +143,9 @@ test("rule scoring is explained: rules met, checklist, trust loops and the actio
   expect(run()!.profile.lead_partner_name).toBe("Jane Partner");
   const kibo = shortlist.locator(".workspace-investor-row").filter({ hasText: "Kibo Ventures" });
   await expect(kibo.locator(".workspace-rules-score")).toHaveText("6rules met");
-  await expect(kibo).toContainText("Reach out via contact · Sonia Fernandez · trust 0.42");
+  await expect(kibo.locator(".workspace-action-chip")).toHaveText("Reach out via contact · Sonia Fernandez");
+  // Trust scores are no longer used and never shown on the shortlist.
+  await expect(shortlist).not.toContainText(/trust/i);
   // The score is a count of rules met, never "x of y" or a 0-100 number.
   await expect(shortlist).not.toContainText("/100");
   await expect(shortlist.locator(".workspace-rules-score").filter({ hasText: " of " })).toHaveCount(0);
