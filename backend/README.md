@@ -64,7 +64,13 @@ round profile. The founder explicitly selects and confirms both matches through
 `/api/onboarding/matches/{id}/confirm`. Confirmation returns a token, the two
 entities, editable company website/sector/HQ prefills and their source references.
 Unknowns stay empty. Explicit Cala industry relationships can supply broad sector
-labels; descriptions and registration addresses do not substitute for field facts.
+labels. Matching retains the owner's REST knowledge query, followed by bounded
+MCP introspection and retrieval for full available metadata. Entity country uses
+headquarters, then office address, then registration when no office exists;
+fallbacks retain their own sources and basis. The owner's headquarters form field
+is prefilled only from HQ evidence. Portfolio Country-match scoring
+receives headquarters-only facts, preserving the owner's rule semantics.
+Descriptions do not substitute for sourced field facts.
 
 The founder then enters the missing fields, current stage, target and commitments
 and submits the completed profile to `/api/runs` with the confirmation token.
@@ -74,11 +80,12 @@ editable. Lead commitment starts as `unconfirmed`. Matching and confirmation do
 not start funding discovery or model assessment. The older `/api/resolve` contract
 remains available for existing full-profile API clients.
 
-The server-side engine in `app/main_scoring.py` is ported from main at `1fed306`.
-Unknown signals contribute zero. `app/scoring.py` adapts sourced typed profiles,
-preserves founder exclusions and drafts, and labels main's flags as review
-status. `RunResult.scoring_version` is `main-1fed306`. Allocation percentages use
-main's greedy method with explicitly labelled equal-share ticket estimates; they
+The owner's scoring and ranking use `app/rules.py`, `app/ranker.py` and
+`app/scoring.py` from `df78081`: 12 binary rules, one point per rule met, with
+unchecked facts shown separately. `RunResult.scoring_version` is `rules-2026-11`.
+Founder-network discovery, trust loops, rule explanations and the action ladder
+are retained. `app/main_scoring.py` remains a legacy/helper module. Allocation
+percentages use the owner's greedy method with labelled equal-share estimates; they
 are neither actual investor checks nor probabilities. Only known EUR totals
 enter those estimates. See [integration details](../docs/branch-basic-integration.md).
 

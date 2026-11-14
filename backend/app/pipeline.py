@@ -145,8 +145,8 @@ class Workflow:
         try:
             started, now = time.monotonic(), utcnow()
             notices = []
-            # With a REST resolver, identities and their metadata come from one knowledge query
-            # each (top three matches); otherwise MCP search plus metadata enrichment is used.
+            # Keep the REST identity query and its top-three matching behavior.
+            # Full property metadata is a separate, bounded MCP read below.
             source = self.identity or self.provider
             operation = "knowledge_query_entities" if self.identity else "search_entities"
             retrieval = Retrieval(source, self.cache, self.settings, Trace(), semaphore=self.semaphore)
@@ -181,9 +181,21 @@ class Workflow:
                     startups = matches[:10]
                 else:
                     leads = matches[:10]
-            if (not self.identity and callable(getattr(self.provider, "entity_metadata", None))
-                    and (leads or startups)):
-                leads, startups = await self._resolve_metadata(retrieval, leads, startups, notices)
+            if callable(getattr(self.provider, "entity_metadata", None)) and (leads or startups):
+                metadata_retrieval = retrieval
+                if self.identity:
+                    # The identity resolver cannot call MCP tools. Give its
+                    # successful matches a fresh metadata window after REST,
+                    # with configured request limits and global concurrency.
+                    metadata_retrieval = Retrieval(self.provider, self.cache, self.settings, Trace(),
+                                                   semaphore=self.semaphore)
+                    metadata_retrieval.stop_at = time.monotonic() + self.settings.cala_request_timeout_seconds
+                leads, startups = await self._resolve_metadata(metadata_retrieval, leads, startups, notices)
+            elif self.identity and (leads or startups):
+                leads = [entity.model_copy(update={"metadata_status": "unavailable"}) for entity in leads]
+                startups = [entity.model_copy(update={"metadata_status": "unavailable"}) for entity in startups]
+                notices.append("Full Cala match metadata was unavailable for this adapter. "
+                               "Basic matches remain available; missing fields stay unknown.")
             if not startups:
                 notices.append("No company match is available. Refine the founder company name before continuing.")
             if not leads:
@@ -265,7 +277,7 @@ class Workflow:
                     continue
 
         tasks = [asyncio.create_task(worker()) for _ in range(min(
-            self.settings.cala_concurrency, len(jobs)))]
+            self.settings.cala_concurrency, 4, len(jobs)))]
         try:
             # Leave a small scheduling margin to return the preserved resolution
             # instead of allowing metadata to consume the whole request window.
@@ -598,12 +610,19 @@ class Workflow:
                 chosen = sorted(company_counts, key=lambda cid: (-company_counts[cid], cid))[:config.company_context_limit]
                 enriched = await asyncio.gather(*(self._optional(retrieval, "entity_metadata", {"entity_id": cid, "company": True},
                                                                  Entity, enabled=retrieval.remaining() > 0) for cid in chosen))
+                # The owner rule means portfolio headquarters. Full metadata
+                # retains office/registration country proxies for display and
+                # inspection, but those proxies cannot become HQ facts.
+                # Include known-round companies even when enrichment times out.
+                known_companies = [funding.company for funding in evidence_rounds]
+                known_companies.extend(funding.company for profile in profiles for funding in profile.rounds)
                 context = rule_book.RuleContext(
                     startup_id=startup_id, startup_rounds_checked=startup_rounds is not None,
                     previous_companies_checked=bool(founders or founder_ids) and previous_checked,
-                    companies={entity.id: entity for entity in enriched if entity is not None})
+                    companies=_portfolio_headquarters_companies(known_companies, enriched))
                 if chosen:
-                    trace.emit("company_context", "Read industry and headquarters of portfolio companies", count=len(context.companies))
+                    trace.emit("company_context", "Read industry and headquarters of portfolio companies",
+                               count=len({entity.id for entity in enriched if entity is not None}))
                 trace.emit("scoring", "Checking each investor against the rule set")
                 for profile in profiles:
                     investor_id = profile.investor.id
@@ -662,6 +681,20 @@ class Workflow:
                               scoring_version=ranker.SCORING_VERSION,
                               allocation=build_allocation(cards, founder.round.remaining_eur))
         trace.emit("complete", f"Run finished: {state}", type="complete", count=len(cards))
+
+
+def _portfolio_headquarters_companies(known: list[Entity], enriched: list[Entity | None]) -> dict[str, Entity]:
+    """Project metadata into the existing headquarters-only rule contract.
+
+    Copies retain addresses, raw properties, provenance and sources. The public
+    entities stay intact; only this private rule view omits proxy countries.
+    """
+    companies = {}
+    for entity in [*known, *(item for item in enriched if item is not None)]:
+        basis = (entity.country_basis or "").casefold()
+        fallback = basis.startswith(("office", "registered", "registration"))
+        companies[entity.id] = entity.model_copy(update={"country": None} if fallback else {}, deep=True)
+    return companies
 
 
 def _resolve_partner(name: str | None, lead_people: list[Role], matches: list[Entity], lead: Entity) -> Entity | None:

@@ -37,15 +37,15 @@ def test_full_metadata_extracts_headquarters_country_without_using_registered_ju
     assert next(item for item in entity.metadata if item.name == "legal_name").value == "Synthetic Fund LP"
 
 
-def test_registered_address_and_unsourced_headquarters_do_not_become_country():
+def test_registered_address_is_last_country_fallback_and_unsourced_headquarters_stays_unknown():
     registered = parse_entity(payload(registered_address=sourced("Port Louis, Mauritius")), AT)
-    assert registered.country is None and registered.country_basis is None
+    assert registered.country == "Mauritius" and registered.country_basis == "registered_address"
     unsourced = parse_entity(payload(headquarters_address={"value": "Paris, France", "sources": []},
                                      website=sourced("example.test")), AT)
     assert unsourced.country is None and unsourced.country_sources == []
 
 
-@pytest.mark.parametrize("address", ["Menlo Park, CA", "1 Road, CA 94025", "1 Road, UK", "Unknown place, Atlantica"])
+@pytest.mark.parametrize("address", ["Menlo Park, CA", "1 Road, California", "1 Road, 94025", "1 Road, UK", "Unknown place, Atlantica"])
 def test_address_tail_must_be_an_exact_full_country_name(address):
     entity = parse_entity(payload(headquarters_address=sourced(address)), AT)
     assert entity.country is None
@@ -84,6 +84,146 @@ def test_country_relationship_is_sourced_and_expired_edges_do_not_assert_current
     assert entity.country == "Mauritius" and entity.country_basis == "headquarters_relationship"
     data["relationships"]["outgoing"]["HAS_HEADQUARTERS_IN"][0]["properties"]["valid_until"] = "2020-01-01"
     assert parse_entity(data, AT).country is None
+
+
+def test_headquarters_wins_over_office_and_registration_without_borrowing_their_sources():
+    entity = parse_entity(payload(
+        headquarters_address=sourced("1 Road, Paris, France", path="hq"),
+        office_address=sourced("2 Road, London, United Kingdom", path="office"),
+        registered_address=sourced("Port Louis, Mauritius", path="registered"),
+    ), AT)
+    assert entity.country == "France" and entity.country_basis == "headquarters_address"
+    assert [str(item.url) for item in entity.country_sources] == ["https://synthetic.example.test/hq"]
+    assert entity.office_address == "2 Road, London, United Kingdom"
+
+
+@pytest.mark.parametrize("office", [
+    "1 Road, Paris, France",
+    {"streetAddress": "1 Road", "city": "Paris", "addressCountry": "FR"},
+    [{"city": "Paris", "country_code": "FRA"}, {"city": "Lyon", "country": "France"}],
+])
+def test_office_address_country_is_preferred_over_registration(office):
+    entity = parse_entity(payload(office_address=sourced(office, path="office"),
+                                  registered_address=sourced("Port Louis, Mauritius", path="registered")), AT)
+    assert entity.country == "France" and entity.country_basis == "office_address"
+    assert [str(item.url) for item in entity.country_sources] == ["https://synthetic.example.test/office"]
+    assert entity.office_address and "France" in entity.office_address
+
+
+@pytest.mark.parametrize("office", ["Menlo Park, CA", "Unknown place, Atlantica", {"streetAddress": "Office address without a country"}])
+def test_present_but_unresolved_office_address_never_falls_through_to_registration(office):
+    entity = parse_entity(payload(office_address=sourced(office, path="office"),
+                                  registered_address=sourced("Port Louis, Mauritius", path="registered")), AT)
+    assert entity.country is None and entity.country_basis == "office_address"
+    assert [str(item.url) for item in entity.country_sources] == ["https://synthetic.example.test/office"]
+
+
+def test_unsourced_office_blocks_registration_without_borrowing_generic_or_registration_evidence():
+    entity = parse_entity(payload(office_address={"value": "Paris, France", "sources": []},
+                                  registered_address=sourced("Port Louis, Mauritius", path="registered"),
+                                  description=sourced("An office in France", path="description")), AT)
+    assert entity.country is None and entity.country_basis == "office_address" and entity.country_sources == []
+
+
+@pytest.mark.parametrize("office", [None, "", [], {}])
+def test_absent_or_empty_office_allows_registration_country_fallback(office):
+    entity = parse_entity(payload(office_address=sourced(office, path="empty-office"),
+                                  registered_address=sourced("Port Louis, Mauritius", path="registered")), AT)
+    assert entity.country == "Mauritius" and entity.country_basis == "registered_address"
+    assert [str(item.url) for item in entity.country_sources] == ["https://synthetic.example.test/registered"]
+
+
+def test_conflicting_offices_remain_unknown_and_cannot_be_resolved_by_registration():
+    entity = parse_entity(payload(office_addresses={"value": [
+        sourced({"city": "Paris", "country": "FR"}, path="office-fr"),
+        sourced({"city": "Berlin", "country": "DE"}, path="office-de"),
+    ], "sources": []}, registered_address=sourced("Paris, France", path="registered")), AT)
+    assert entity.country is None and entity.country_basis == "conflicting_metadata"
+    assert {str(item.url) for item in entity.country_sources} == {
+        "https://synthetic.example.test/office-fr", "https://synthetic.example.test/office-de"}
+
+
+def test_higher_priority_headquarters_conflict_is_not_hidden_by_office_fallback():
+    entity = parse_entity(payload(country=sourced("US", path="country"),
+                                  headquarters_address=sourced("Paris, France", path="hq"),
+                                  office_address=sourced("Madrid, Spain", path="office")), AT)
+    assert entity.country is None and entity.country_basis == "conflicting_metadata"
+    assert {str(item.url) for item in entity.country_sources} == {
+        "https://synthetic.example.test/country", "https://synthetic.example.test/hq"}
+
+
+def test_registration_country_property_relationship_and_address_keep_specific_provenance():
+    prop = parse_entity(payload(registration_country=sourced("MU", path="registration-country")), AT)
+    assert prop.country == "Mauritius" and prop.country_basis == "registration_country_property"
+    data = payload()
+    data["relationships"] = {"outgoing": {"IS_REGISTERED_IN": [relation("France", path="registration-relation")]}}
+    rel = parse_entity(data, AT)
+    assert rel.country == "France" and rel.country_basis == "registration_relationship"
+    assert str(rel.country_sources[0].url) == "https://synthetic.example.test/registration-relation"
+    address = parse_entity(payload(registration_address=sourced({"city": "Port Louis", "country": "MU"}, path="address")), AT)
+    assert address.country == "Mauritius" and address.country_basis == "registration_address"
+    assert address.registered_address == "Port Louis, Mauritius"
+
+
+def test_expired_registration_relation_is_not_used_and_registration_conflicts_stay_unknown():
+    data = payload()
+    data["relationships"] = {"outgoing": {"IS_REGISTERED_IN": [relation("France", valid_until="2020-01-01")]}}
+    assert parse_entity(data, AT).country is None
+    conflict = parse_entity(payload(registered_country=sourced("FR", path="reg-country"),
+                                    registered_address=sourced("Port Louis, Mauritius", path="reg-address")), AT)
+    assert conflict.country is None and conflict.country_basis == "conflicting_metadata"
+
+
+@pytest.mark.parametrize("address", [
+    "2200 Sand Hill Road, Menlo Park, California 94025",
+    "1 Road, CA 94025",
+    "1 Road, New York 10001-1234",
+])
+def test_terminal_us_state_and_zip_resolve_sourced_registration_address(address):
+    entity = parse_entity(payload(registered_address=sourced(address, path="real-shape")), AT)
+    assert entity.country == "United States" and entity.country_basis == "registered_address"
+    assert str(entity.country_sources[0].url) == "https://synthetic.example.test/real-shape"
+
+
+def test_us_state_zip_never_overrides_explicit_country_or_uses_description():
+    string = parse_entity(payload(office_address=sourced("1 Road, CA 94025, United Kingdom")), AT)
+    assert string.country == "United Kingdom"
+    structured = parse_entity(payload(office_address=sourced({"region": "California", "postalCode": "94025", "country": "FR"})), AT)
+    assert structured.country == "France"
+    unknown = parse_entity(payload(office_address=sourced({"region": "California", "postalCode": "94025", "country": "Atlantica"})), AT)
+    assert unknown.country is None
+    description = parse_entity(payload(description=sourced("California 94025", path="description")), AT)
+    assert description.country is None
+
+
+def test_nested_address_fields_require_their_own_country_or_both_state_zip_sources():
+    unsourced_country = parse_entity(payload(office_address={"value": {
+        "country": "France", "region": sourced("California", path="region"),
+        "postalCode": sourced("94025", path="postal"),
+    }, "sources": []}), AT)
+    assert unsourced_country.country is None and unsourced_country.country_basis == "office_address"
+    assert {str(item.url) for item in unsourced_country.country_sources} == {
+        "https://synthetic.example.test/region", "https://synthetic.example.test/postal"}
+    state_only = parse_entity(payload(office_address={"value": {
+        "region": sourced("California", path="region"), "postalCode": "94025",
+    }, "sources": []}), AT)
+    assert state_only.country is None
+    both = parse_entity(payload(office_address={"value": {
+        "region": sourced("California", path="region"), "postalCode": sourced("94025", path="postal"),
+    }, "sources": []}), AT)
+    assert both.country == "United States" and both.country_basis == "office_address"
+    assert {str(item.url) for item in both.country_sources} == {
+        "https://synthetic.example.test/region", "https://synthetic.example.test/postal"}
+    assert both.office_address == "California, 94025"
+
+
+def test_per_office_country_sources_are_not_borrowed_from_other_offices():
+    entity = parse_entity(payload(office_addresses={"value": [
+        {"city": "Paris", "country": sourced("FR", path="fr-country")},
+        {"city": "Berlin", "country": "DE", "streetAddress": sourced("1 Road", path="de-street")},
+    ], "sources": []}), AT)
+    assert entity.country == "France" and entity.country_basis == "office_address"
+    assert [str(item.url) for item in entity.country_sources] == ["https://synthetic.example.test/fr-country"]
 
 
 def test_legal_entity_type_and_description_do_not_invent_investor_category():

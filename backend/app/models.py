@@ -37,6 +37,7 @@ class Entity(Model):
     sources: list[Source] = Field(default_factory=list)
     entity_type: str | None = None
     headquarters_address: str | None = None
+    office_address: str | None = None
     registered_address: str | None = None
     country_basis: str | None = None
     country_sources: list[Source] = Field(default_factory=list)

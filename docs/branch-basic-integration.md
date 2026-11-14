@@ -1,5 +1,37 @@
 # Branch-basic integration
 
+## Current owner merge — 14 November 2026
+
+The implementation is based on the owner's `branch-basic` commit `df78081`.
+The owner's layouts, navigation, rule explanations, graph, trust-loop controls,
+founder-network discovery and 12-rule scoring/ranking policy take precedence.
+The policy modules (`rules.py`, `ranker.py`, `scoring.py`, `trust.py` and
+`main_scoring.py`) are retained unchanged from that commit. Metadata labels and
+optional wire fields are the only frontend compatibility additions.
+
+Company matching keeps the owner's REST knowledge query. A subsequent bounded
+MCP read enriches each offered identity using all properties advertised by Cala
+introspection, preserving exact IDs, field-specific sources and retrieval dates.
+Failure preserves the basic selectable identity and explicitly reports missing
+full metadata. Investor profiles retain the owner's native full-property reads.
+
+The local HQ → office → registration country fallback remains available for
+metadata display and chat. Registration is used only when no office address
+exists. The owner's HQ form field and portfolio Country-match rule receive HQ-only facts,
+so a fallback address never masquerades as headquarters scoring evidence.
+Chat receives the country basis and its own source references.
+Structured chat replies constrain citation and candidate IDs to the saved source
+catalog and shortlist, retaining server-side validation and the owner's provider
+compatibility behavior.
+
+The local work before this merge is preserved in Git stash
+`local-full-metadata-before-owner-merge-2026-11-14`. The earlier connection-method
+implementation remains in its separate `backup-before-restoring-branch-basic`
+stash and was not reapplied over the owner's implementation.
+
+The following sections document the earlier integration; this current owner
+merge supersedes their scoring and discovery details where they differ.
+
 This branch combines the requested features into one FastAPI backend and one
 Next.js frontend. The standalone static app from main is not a second runtime.
 

@@ -1,5 +1,40 @@
 # Branch-basic implementation and verification
 
+## Current owner merge — 14 November 2026
+
+Current source baseline: owner `branch-basic` at `df78081`, including the owner's
+12-rule scoring, rule-count UI, founder-network candidates, trust loops and action
+recommendations. The policy files remain unchanged. Local integration restores
+full Cala metadata enrichment after REST matching, address-country fallbacks,
+field-specific sources and an HQ-only data projection for portfolio geography.
+
+Verification of this integration:
+
+- All 288 backend tests passed, including the owner's ranking, rule scoring,
+  trust loops, founder-network workflow and the full-metadata merge regressions.
+- All 27 selected frontend checks passed: owner score explanations and action
+  ladder, graph invariants, setup/chat behavior and nine metadata cases.
+- TypeScript and the optimized Next.js production build passed.
+- A real Cala AI/Kfund lookup returned 17 startup properties and nine lead
+  properties through full metadata reads. The confirmed startup retained its
+  headquarters evidence; the lead retained its registration-address fallback.
+- The real confirmed workflow completed in 51.953 seconds, used 61 of the owner's
+  72-call budget and returned five cards under `rules-2026-11`, with scores
+  10, 9, 8, 4 and 4. Three cards carried trust loops and existing/founder-network
+  origins. Graph coverage remains explicitly partial.
+- Live Codex chat over the real result passed with 16 validated citations after
+  constraining structured source/candidate IDs to the saved catalog and shortlist.
+  The owner's DeepSeek JSON-object compatibility fallback remains unchanged.
+- Final metadata browser checks confirm that office/registration fallbacks stay
+  visible and sourced while unverified founder headquarters remains empty/editable.
+  Desktop/mobile visual review confirmed the owner's layouts, rule explanations,
+  trust loops and footer; no horizontal overflow or browser errors were observed.
+
+The remainder of this document records earlier snapshots and should not be read
+as the current owner's scoring or discovery policy.
+
+## Earlier implementation and verification
+
 The backend gate passed before frontend development; see
 [the measured gate evidence](backend-readiness.md). Separate FastAPI and Next.js
 applications now implement the combined founder workflow through HTTP and SSE.

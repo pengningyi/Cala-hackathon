@@ -3,8 +3,9 @@
 The onboarding "Confirm matches" step finds the founder company and the lead investor with
 `POST /v1/knowledge/query` (dot-notation input) instead of MCP. One query per name returns
 both the matching rows (website, industry, country, headquarters, description, investor
-type) and the Cala entities they refer to, so no separate metadata call is needed. Entity
-ids are the same Cala graph ids MCP uses, so a confirmed match hands off to the MCP run.
+type) and the Cala entities they refer to. The workflow then enriches these candidates
+through MCP entity introspection and retrieval for full available property metadata.
+Entity IDs are validated before a confirmed match hands off to the MCP run.
 """
 from __future__ import annotations
 

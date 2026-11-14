@@ -627,6 +627,68 @@
               }
             ],
             "title": "Ticket Estimate Basis"
+          },
+          "trust": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust"
+          },
+          "loops": {
+            "items": {
+              "$ref": "#/components/schemas/TrustLoop"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Loops"
+          },
+          "recommended_action": {
+            "type": "string",
+            "enum": [
+              "reach_out_directly",
+              "reach_out_via_contact",
+              "ask_lead_intro",
+              "advisor_angel",
+              "skip"
+            ],
+            "title": "Recommended Action",
+            "default": "ask_lead_intro"
+          },
+          "action_contact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Entity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origins": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "lead_network",
+                "existing_investor",
+                "previous_company_backer"
+              ]
+            },
+            "type": "array",
+            "title": "Origins"
+          },
+          "origin_rounds": {
+            "items": {
+              "$ref": "#/components/schemas/FundingRound"
+            },
+            "type": "array",
+            "title": "Origin Rounds"
           }
         },
         "additionalProperties": false,
@@ -1143,6 +1205,17 @@
             ],
             "title": "Headquarters Address"
           },
+          "office_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Office Address"
+          },
           "registered_address": {
             "anyOf": [
               {
@@ -1327,6 +1400,34 @@
           },
           "preferences": {
             "$ref": "#/components/schemas/Preferences"
+          },
+          "lead_partner_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Partner Name"
+          },
+          "founder_person_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Founder Person Ids"
+          },
+          "confirmed_loop_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Confirmed Loop Ids"
           }
         },
         "additionalProperties": false,
@@ -1381,6 +1482,34 @@
           },
           "preferences": {
             "$ref": "#/components/schemas/Preferences"
+          },
+          "lead_partner_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Partner Name"
+          },
+          "founder_person_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Founder Person Ids"
+          },
+          "confirmed_loop_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Confirmed Loop Ids"
           }
         },
         "additionalProperties": false,
@@ -1390,6 +1519,34 @@
           "round"
         ],
         "title": "FounderInput"
+      },
+      "FundEvent": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "event_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Event Date"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "event_date"
+        ],
+        "title": "FundEvent",
+        "description": "A sourced announcement of a new fund or vehicle managed by an investor."
       },
       "FundingRound": {
         "properties": {
@@ -1670,6 +1827,25 @@
             },
             "type": "array",
             "title": "Sources"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "type": "array",
+            "title": "People"
+          },
+          "fund_events": {
+            "items": {
+              "$ref": "#/components/schemas/FundEvent"
+            },
+            "type": "array",
+            "title": "Fund Events"
+          },
+          "fund_data_available": {
+            "type": "boolean",
+            "title": "Fund Data Available",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -1862,6 +2038,72 @@
           "profile"
         ],
         "title": "ResolveRequest"
+      },
+      "Role": {
+        "properties": {
+          "person": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "org": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "works_at",
+              "member_of",
+              "board",
+              "founded",
+              "studied_at"
+            ],
+            "title": "Kind"
+          },
+          "valid_since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Since"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current",
+            "default": false
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "person",
+          "org",
+          "kind"
+        ],
+        "title": "Role",
+        "description": "A sourced, typed person-organisation relationship with its validity window."
       },
       "RoundInput-Input": {
         "properties": {
@@ -2115,7 +2357,7 @@
           "scoring_version": {
             "type": "string",
             "title": "Scoring Version",
-            "default": "main-1fed306"
+            "default": "rules-2026-11"
           },
           "allocation": {
             "items": {
@@ -2261,6 +2503,17 @@
             },
             "type": "array",
             "title": "Sources"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "additionalProperties": false,
@@ -2272,7 +2525,8 @@
           "known",
           "explanation"
         ],
-        "title": "ScoreComponent"
+        "title": "ScoreComponent",
+        "description": "One rule result: value 1 = met, 0 = not met; known=False = not checked."
       },
       "Source": {
         "properties": {
@@ -2522,6 +2776,165 @@
           "kind"
         ],
         "title": "TicketCriterion"
+      },
+      "TrustHop": {
+        "properties": {
+          "from_id": {
+            "type": "string",
+            "title": "From Id"
+          },
+          "from_name": {
+            "type": "string",
+            "title": "From Name"
+          },
+          "to_id": {
+            "type": "string",
+            "title": "To Id"
+          },
+          "to_name": {
+            "type": "string",
+            "title": "To Name"
+          },
+          "edge_type": {
+            "type": "string",
+            "enum": [
+              "worked_together",
+              "board",
+              "co_invested",
+              "person_at_fund",
+              "led",
+              "same_school",
+              "invested_in",
+              "founded"
+            ],
+            "title": "Edge Type"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Entity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "strength": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Strength"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from_id",
+          "from_name",
+          "to_id",
+          "to_name",
+          "edge_type",
+          "strength"
+        ],
+        "title": "TrustHop"
+      },
+      "TrustLoop": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "known",
+              "one_contact",
+              "multi_contact",
+              "lead_loop",
+              "existing_investor",
+              "previous_company"
+            ],
+            "title": "Kind"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Entity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closes_through_lead": {
+            "type": "boolean",
+            "title": "Closes Through Lead",
+            "default": false
+          },
+          "hops": {
+            "items": {
+              "$ref": "#/components/schemas/TrustHop"
+            },
+            "type": "array",
+            "title": "Hops"
+          },
+          "strength": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Strength"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed",
+            "default": false
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": "Public professional overlap; personal relationship unconfirmed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "hops",
+          "strength"
+        ],
+        "title": "TrustLoop"
       },
       "ValidationError": {
         "properties": {

@@ -71,8 +71,10 @@ def startup_prefill(startup: Entity) -> tuple[CompanyPrefill, dict[str, list[Sou
                 selected.append(item)
         prefill.sector = ", ".join(selected)
         refs["sector"] = sector_sources if selected else []
-    if (startup.country and len(startup.country) <= 100 and startup.country_sources
-            and "register" not in (startup.country_basis or "").casefold()):
+    # The owner's form asks for headquarters and its rules compare that fact.
+    # Keep address proxies visible in metadata without silently confirming HQ.
+    address_fallback = (startup.country_basis or "").casefold().startswith(("office", "registered", "registration"))
+    if startup.country and len(startup.country) <= 100 and startup.country_sources and not address_fallback:
         prefill.country = startup.country
         refs["country"] = list(startup.country_sources)
     return prefill, {key: _unique(values) for key, values in refs.items()}

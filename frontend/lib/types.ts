@@ -35,6 +35,7 @@ export interface Entity {
   sources: Source[];
   entity_type?: string | null;
   headquarters_address?: string | null;
+  office_address?: string | null;
   registered_address?: string | null;
   country_basis?: string | null;
   country_sources?: Source[];

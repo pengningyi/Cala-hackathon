@@ -6,7 +6,7 @@ const CATEGORY_LABELS: Partial<Record<InvestorKind, string>> = {
 };
 const FIELD_LABELS: Record<string, string> = {
   id: "Cala entity ID", lei: "LEI", cik: "CIK", website: "Website",
-  headquarters_address: "Headquarters address", registered_address: "Registered address",
+  headquarters_address: "Headquarters address", office_address: "Office address", registered_address: "Registered address",
   country: "Country", country_name: "Country", legal_name: "Legal name",
   founding_date: "Founding date", funding_stage: "Funding stage",
 };
@@ -32,6 +32,27 @@ function publicUrl(value?: string | null): string | null {
 
 function hostname(url: string): string {
   try { return new URL(url).hostname; } catch { return url; }
+}
+
+function countryPresentation(entity: Entity) {
+  const basis = (entity.country_basis || "").toLowerCase();
+  const registration = basis.startsWith("registered") || basis.startsWith("registration");
+  const office = basis.startsWith("office");
+  const headquarters = basis.startsWith("headquarters") || basis === "country_property";
+  const explanation = basis.includes("conflict") ? "Conflicting metadata; no country has been confirmed."
+    : registration ? "Registration address fallback; headquarters unconfirmed."
+      : office ? "Office address fallback; headquarters unconfirmed."
+        : basis === "headquarters_relationship" ? "Based on the headquarters location relationship."
+          : basis === "headquarters_address" ? "Based on the headquarters address."
+            : basis === "country_property" ? "Based on Cala's country property."
+              : headquarters ? "Based on headquarters metadata."
+                : "Headquarters location is unconfirmed.";
+  const summary = !entity.country ? "Headquarters country unknown"
+    : registration ? `Country: ${entity.country} (registration address fallback)`
+      : office ? `Country: ${entity.country} (office address fallback)`
+        : headquarters ? `Headquarters: ${entity.country}`
+          : `Country: ${entity.country} (headquarters unconfirmed)`;
+  return { summary, label: headquarters && entity.country ? "Headquarters country" : "Country", explanation };
 }
 
 function MetadataSources({ sources }: { sources: Source[] }) {
@@ -63,8 +84,9 @@ function MetadataValue({ value }: { value: unknown }) {
 export function EntityIdentity({ entity }: { entity: Entity }) {
   const category = CATEGORY_LABELS[entity.kind];
   const entityType = entity.entity_type || (entity.kind === "company" ? "Company" : null);
+  const country = countryPresentation(entity);
   return <span className="entity-identity-meta">
-    <span>{entity.country ? `Headquarters: ${entity.country}` : "Headquarters country unknown"}</span>
+    <span>{country.summary}</span>
     <span>Entity type: {entityType || "Unknown"}</span>
     {category && <span>Investor category: {category}</span>}
   </span>;
@@ -74,7 +96,8 @@ export function EntityIdentity({ entity }: { entity: Entity }) {
 export default function EntityMetadata({ entity }: { entity: Entity }) {
   const metadata = entity.metadata || [];
   const website = publicUrl(entity.website);
-  const hasDetails = metadata.length > 0 || entity.headquarters_address || entity.registered_address
+  const country = countryPresentation(entity);
+  const hasDetails = metadata.length > 0 || entity.headquarters_address || entity.office_address || entity.registered_address || entity.country_basis
     || entity.country_sources?.length || entity.kind_sources?.length || entity.metadata_status === "retrieved";
   if (!hasDetails) return entity.metadata_status === "unavailable"
     ? <p className="entity-metadata-status">Additional Cala details could not be retrieved. Available identity details are shown.</p> : null;
@@ -87,8 +110,10 @@ export default function EntityMetadata({ entity }: { entity: Entity }) {
         {website && <div><dt>Website</dt><dd><a href={website} target="_blank" rel="noopener noreferrer">{hostname(website)}<ExternalLink size={11} /></a></dd></div>}
         <div><dt>Entity type</dt><dd>{entity.entity_type || (entity.kind === "company" ? "Company" : "Not provided")}</dd></div>
         <div><dt>Investor category</dt><dd>{category || "Unconfirmed"}{entity.kind_sources?.length ? <MetadataSources sources={entity.kind_sources} /> : null}</dd></div>
-        {entity.country && <div><dt>Headquarters country</dt><dd>{entity.country}{entity.country_sources?.length ? <MetadataSources sources={entity.country_sources} /> : null}</dd></div>}
+        {(entity.country || entity.country_basis || entity.country_sources?.length) && <div><dt>{country.label}</dt><dd>{entity.country || "Unknown"}
+          <small> · {country.explanation}</small><MetadataSources sources={entity.country_sources || []} /></dd></div>}
         {entity.headquarters_address && <div><dt>Headquarters address</dt><dd>{entity.headquarters_address}</dd></div>}
+        {entity.office_address && <div><dt>Office address</dt><dd>{entity.office_address}</dd></div>}
         {entity.registered_address && <div><dt>Registered address</dt><dd>{entity.registered_address}</dd></div>}
       </dl>
       {metadata.length > 0 && <div className="entity-metadata-properties"><h5>Returned properties</h5>

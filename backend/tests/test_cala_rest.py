@@ -88,15 +88,19 @@ def test_http_errors_become_cala_errors(monkeypatch, status, transient):
     assert error.value.transient is transient and "test-only-key" not in error.value.message
 
 
-class FailingMCP:
-    """Any MCP call during onboarding lookup is a test failure."""
+class UnavailableMetadataMCP:
+    """REST identities remain selectable when optional full metadata fails."""
     configured = True
 
-    def __getattr__(self, name):
-        raise AssertionError(f"MCP provider was called: {name}")
+    def __init__(self):
+        self.calls = []
+
+    async def entity_metadata(self, entity_id, company=False):
+        self.calls.append((entity_id, company))
+        raise CalaError("synthetic_unavailable", "Synthetic metadata unavailable")
 
 
-def test_confirm_matches_uses_rest_only_and_prefills_from_query(tmp_path, monkeypatch):
+def test_rest_matches_preserve_query_prefills_when_full_metadata_is_unavailable(tmp_path, monkeypatch):
     queries = []
 
     def respond(request):
@@ -105,13 +109,16 @@ def test_confirm_matches_uses_rest_only_and_prefills_from_query(tmp_path, monkey
         return httpx.Response(200, json=STARTUP_RESPONSE if "Cala AI" in text else LEAD_RESPONSE)
 
     mock_cala(monkeypatch, respond)
-    workflow = Workflow(settings(tmp_path), FailingMCP(), identity=CalaKnowledgeResolver("test-only-key"))
+    provider = UnavailableMetadataMCP()
+    workflow = Workflow(settings(tmp_path), provider, identity=CalaKnowledgeResolver("test-only-key"))
     matches = asyncio.run(workflow.match_companies(
         CompanyMatchRequest(company_name="Cala AI", lead_name="Lightspeed Venture Partners")))
     assert len(queries) == 2 and all(".limit=3." in q for q in queries)
     assert [e.id for e in matches.startup_matches] == ["81cfdabc"]
     assert [e.id for e in matches.lead_matches] == ["5a9d0c1c"]
-    assert not any("metadata was unavailable" in notice for notice in matches.notices)
+    assert set(provider.calls) == {("81cfdabc", True), ("5a9d0c1c", False)}
+    assert matches.startup_matches[0].metadata_status == matches.lead_matches[0].metadata_status == "unavailable"
+    assert any("metadata was unavailable" in notice for notice in matches.notices)
     confirmation = workflow.confirm_companies(matches.id, ConfirmCompanyMatches(startup_id="81cfdabc", lead_id="5a9d0c1c"))
     prefill = confirmation.prefill
     assert prefill.website == "https://www.cala.ai/" and prefill.country == "Spain"

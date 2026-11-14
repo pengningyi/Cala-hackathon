@@ -15,8 +15,11 @@ mappings. Do not send API credentials in founder payloads.
 
 Both names are required. Returns `CompanyMatches`: `id`, `startup_matches`,
 `lead_matches`, `resolver_ms`, `created_at`, `expires_at` and `notices`. Cala
-searches and optional metadata enrichment share the resolver deadline and call
-budget. No founder round, funding discovery or model assessment is required.
+uses the owner's REST knowledge query for matching, then MCP entity introspection
+and retrieval for all advertised property metadata. REST matching has a shared
+40-second default window; optional MCP enrichment has a shared 15-second default
+window afterward. Failed enrichment preserves selectable basic matches with an
+unavailable status and a notice. No founder round, funding discovery or model assessment is required.
 Neither the first match nor a single result is implicitly confirmed.
 
 `POST /api/onboarding/matches/{id}/confirm` accepts exact offered IDs:
@@ -29,8 +32,10 @@ Returns `CompanyConfirmation`: `resolution_id`, `startup`, `lead`, `prefill`,
 `prefill_sources`, `expires_at`, and `notices`. `prefill` contains canonical
 `company_name`, `website`, `sector` and `country`; unsupported fields are empty
 strings. `prefill_sources` maps field names to the original dated source records.
-Sector uses explicit sourced industry/sector metadata, and HQ excludes a known
-registration-only country. Descriptions, generic entity types and historical
+Sector uses explicit sourced industry/sector metadata. The owner's headquarters
+country field is prefilled only from headquarters evidence. Office/registration
+fallbacks remain visible in entity metadata with their original field sources;
+they do not silently establish founder headquarters. Descriptions, generic entity types and historical
 funding stages do not fill current founder facts.
 
 The user edits supported prefills and supplies missing profile fields, stage,
@@ -112,16 +117,22 @@ Entity metadata fields have backward-compatible defaults:
 | Field | Meaning |
 | --- | --- |
 | `entity_type` | Cala's legal/ontology type, such as `Company`, `Organization` or `Person`; separate from investor `kind` |
-| `headquarters_address`, `registered_address` | Available headquarters and registration addresses, kept distinct |
-| `country_basis`, `country_sources` | How the headquarters country was established, with field-specific source links and dates |
+| `headquarters_address`, `office_address`, `registered_address` | Available headquarters, office and registration addresses, kept distinct |
+| `country_basis`, `country_sources` | Headquarters evidence or a labelled address fallback, with field-specific source links and dates |
 | `kind_basis`, `kind_sources` | Evidence for an investor category; legal company type alone does not establish VC or corporate-VC status |
 | `metadata` | All returned property records as `{name, value, sources}`; values retain their JSON types and missing source links stay absent |
 | `metadata_status` | `not_requested`, `retrieved` or `unavailable`; `retrieved` describes the property read, not complete graph coverage |
 | `metadata_retrieved_at` | Actual retrieval time of the metadata response |
 
-Country extraction uses sourced country properties, headquarters relationships or
-an explicitly named country in the headquarters address. Registration location is
-never silently used as headquarters location. Website values without a scheme
+Country extraction first uses sourced country properties, headquarters relationships
+or the headquarters address. A sourced office address supplies a fallback when
+headquarters country is unavailable; registration is considered only if no office
+address is present. Conflicts and ambiguous or unsourced addresses remain unknown.
+A terminal US state and ZIP pair can establish an address-country proxy; a city
+or bare state code cannot. Metadata display and chat retain the fallback basis;
+the founder enters actual headquarters if only a fallback is known. The owner's portfolio Country-match rule receives a separate
+headquarters-only data projection, so office and registration fallbacks do not
+become headquarters scoring evidence. Website values without a scheme
 are normalized to HTTPS when they are valid web addresses. Unsupported investor
 categories remain unknown. New native country/category filters use the relevant
 field's evidence, rather than unrelated sources from another property. The same

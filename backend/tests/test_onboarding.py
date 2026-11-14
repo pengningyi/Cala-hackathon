@@ -122,14 +122,25 @@ def test_confirmed_fields_have_specific_sources_and_unknown_round_fields_are_abs
     asyncio.run(scenario())
 
 
-def test_unsourced_or_registration_country_and_description_do_not_fill_unknowns():
+def test_unsourced_country_and_description_do_not_fill_unknowns():
     entity = Entity(id="s", name="Known name", description="A Finnish AI startup raising a Series A of EUR 5 million.",
-                    country="Finland", country_basis="registered_address", country_sources=[source()],
+                    country="Finland", country_basis="registered_address", country_sources=[],
                     metadata=[EntityMetadataProperty(name="industry", value="AI", sources=[]),
                               EntityMetadataProperty(name="entity_type", value="Company", sources=[source()])])
     fields, refs = startup_prefill(entity)
     assert fields.model_dump() == {"company_name": "Known name", "website": "", "sector": "", "country": ""}
     assert refs["website"] == refs["sector"] == refs["country"] == []
+
+
+@pytest.mark.parametrize("basis", ["office_address", "registered_address", "registration_country_property", "registration_relationship"])
+def test_sourced_address_country_does_not_silently_prefill_owner_headquarters_field(basis):
+    address_source = source(basis)
+    entity = Entity(id="startup", name="Known name", country="Finland",
+                    country_basis=basis, country_sources=[address_source], sources=[source("unrelated")])
+    fields, refs = startup_prefill(entity)
+    assert fields.country == ""
+    assert refs["country"] == []
+    assert entity.country == "Finland" and entity.country_sources == [address_source]
 
 
 def test_website_prefill_normalizes_bare_host_without_borrowing_other_field_sources():
