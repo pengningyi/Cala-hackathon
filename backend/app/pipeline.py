@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -333,13 +334,13 @@ class Workflow:
         record.task = asyncio.create_task(self._execute(record))
         return record.status()
 
-    async def _optional(self, retrieval, operation, args, result_type, *, enabled=True):
+    async def _optional(self, retrieval, operation, args, result_type, *, enabled=True, step="trust"):
         """A bounded lookup whose failure leaves its signal unknown and never blocks the run."""
         from .cala import CalaError
         if not enabled or not hasattr(self.provider, operation):
             return None
         try:
-            return await retrieval.call(operation, args, result_type, "trust")
+            return await retrieval.call(operation, args, result_type, step)
         except (CalaError, BudgetExceeded):
             return None
 
@@ -484,6 +485,7 @@ class Workflow:
         config, trace, founder, lead = self.settings, run.trace, run.profile, run.lead
         retrieval = Retrieval(self.provider, self.cache, config, trace, run.started, self.semaphore)
         cards, excluded, incomplete, notices, profiles = [], [], [], [], []
+        retrieved_people: list[Role] = []
         people_task = None
         discovered, profiled_count, graph_complete, graph_received = 0, 0, False, False
         candidate_rounds: dict[str, list[FundingRound]] = {}
@@ -510,6 +512,7 @@ class Workflow:
                                    list[FundingRound], enabled=bool(startup_id and config.startup_round_limit)),
                 )
                 graph_received, graph_complete = True, graph.complete
+                retrieved_people.extend([*graph.people, *(startup_people or [])])
                 if graph.lead is not None:
                     if graph.lead.id != lead.id:
                         raise CalaError("invalid_lead_graph", "Cala graph identifies a different lead")
@@ -553,6 +556,7 @@ class Workflow:
                 profiled_count += await self._profile(retrieval, preliminary, max(1, config.profile_pool_limit - reserve),
                                                       founder, lead, profiles, excluded, incomplete, notices, trace)
                 trust_roles, headcounts, founders, previous_rounds, previous_checked = await people_task
+                retrieved_people.extend(trust_roles)
                 # Source 3: backers of the founders' previous companies.
                 before = set(candidate_entities)
                 self._add_origin(previous_rounds, "previous_company_backer", lead, candidate_entities, origin_rounds, origins)
@@ -570,6 +574,7 @@ class Workflow:
                                                           founder, lead, profiles, excluded, incomplete, notices, trace)
 
                 if profiles and self.semantic and getattr(self.semantic, "enabled", True):
+                    retrieved_people.extend(role for profile in profiles for role in profile.people)
                     trace.emit("assessments", "Assessing sector and portfolio overlap from retrieved Cala facts")
                     remaining = run.started + config.run_deadline_seconds - time.monotonic() - 0.25
                     if remaining > 0:
@@ -608,8 +613,11 @@ class Workflow:
                     for company_id in ids:
                         company_counts[company_id] = company_counts.get(company_id, 0) + 1
                 chosen = sorted(company_counts, key=lambda cid: (-company_counts[cid], cid))[:config.company_context_limit]
+                if chosen:
+                    trace.emit("company_context", "Checking portfolio company industry and headquarters", count=len(chosen))
                 enriched = await asyncio.gather(*(self._optional(retrieval, "entity_metadata", {"entity_id": cid, "company": True},
-                                                                 Entity, enabled=retrieval.remaining() > 0) for cid in chosen))
+                                                                 Entity, enabled=retrieval.remaining() > 0,
+                                                                 step="company_context") for cid in chosen))
                 # The owner rule means portfolio headquarters. Full metadata
                 # retains office/registration country proxies for display and
                 # inspection, but those proxies cannot become HQ facts.
@@ -644,6 +652,7 @@ class Workflow:
                     card.trust, card.loops = trust.measure(trust_graph, founders, lead, lead_partner, card.investor, confirmed)
                 trace.emit("loops", "Measured trust loops through your company, founders, common contacts and the lead", type="loops",
                            count=sum(len(card.loops) for card in cards))
+                trace.emit("finalizing", "Preparing your shortlist, introduction requests and allocation")
                 for card in cards:
                     finalize_card(card, founder, lead)
                 cards = ranker.rank(cards)[:config.profile_limit]
@@ -664,6 +673,10 @@ class Workflow:
             logging.getLogger(__name__).exception("Run %s failed", run.id)
         if people_task is not None and not people_task.done():
             people_task.cancel()
+        elif people_task is not None and not people_task.cancelled() and people_task.exception() is None:
+            # A completed people lookup can survive a later failure elsewhere.
+            retrieved_people.extend(people_task.result()[0])
+        retrieved_people.extend(role for profile in profiles for role in profile.people)
         finished = utcnow()
         run.result = RunResult(run_id=run.id, state=state, profile=founder, lead=lead,
                               confirmed_at=run.confirmed_at, finished_at=finished,
@@ -679,8 +692,59 @@ class Workflow:
                               cala_calls=retrieval.calls, cache_hits=retrieval.cache_hits,
                               retrieval_timestamps=sorted(set(retrieval.timestamps)), error=error,
                               scoring_version=ranker.SCORING_VERSION,
+                              people=_serialized_people(retrieved_people),
                               allocation=build_allocation(cards, founder.round.remaining_eur))
         trace.emit("complete", f"Run finished: {state}", type="complete", count=len(cards))
+
+
+def _merge_sources(*groups):
+    sources = {(str(item.url), str(item.published_at), item.retrieved_at.isoformat(), item.label): item
+               for group in groups for item in group}
+    return [sources[key] for key in sorted(sources)]
+
+
+def _merge_role_entities(first: Entity, second: Entity) -> Entity:
+    """Keep richer identity details without merging separate Cala identities."""
+    def richness(entity):
+        data = entity.model_dump(mode="json", exclude_none=True)
+        return len(entity.metadata), sum(bool(value) for value in data.values()), json.dumps(data, sort_keys=True)
+
+    primary, other = sorted((first, second), key=richness, reverse=True)
+    properties = {}
+    for item in [*primary.metadata, *other.metadata]:
+        key = (item.name, json.dumps(item.model_dump(mode="json")["value"], sort_keys=True, ensure_ascii=False))
+        if key in properties:
+            item = item.model_copy(update={"sources": _merge_sources(properties[key].sources, item.sources)})
+        properties[key] = item
+    updates = {"sources": _merge_sources(primary.sources, other.sources),
+               "aliases": sorted(set(primary.aliases + other.aliases)),
+               "related_entity_ids": sorted(set(primary.related_entity_ids + other.related_entity_ids)),
+               "metadata": [properties[key] for key in sorted(properties)]}
+    for field in ("entity_type", "description", "website", "headquarters_address", "office_address", "registered_address"):
+        if getattr(primary, field) is None and getattr(other, field) is not None:
+            updates[field] = getattr(other, field)
+    for field in ("country", "kind"):
+        if getattr(primary, field) == getattr(other, field) and getattr(primary, field + "_basis") == getattr(other, field + "_basis"):
+            updates[field + "_sources"] = _merge_sources(getattr(primary, field + "_sources"), getattr(other, field + "_sources"))
+    return primary.model_copy(update=updates, deep=True)
+
+
+def _serialized_people(roles: list[Role]) -> list[Role]:
+    """Deduplicate the display snapshot; leave trust/scoring role inputs intact."""
+    people = {}
+    for role in sorted(roles, key=lambda role: json.dumps(role.model_dump(mode="json"), sort_keys=True)):
+        if not role.sources:
+            continue
+        key = (role.person.id, role.org.id, role.kind, role.valid_since, role.valid_until, role.current)
+        if key in people:
+            prior = people[key]
+            role = role.model_copy(update={"person": _merge_role_entities(prior.person, role.person),
+                                           "org": _merge_role_entities(prior.org, role.org),
+                                           "sources": _merge_sources(prior.sources, role.sources)}, deep=True)
+        else:
+            role = role.model_copy(update={"sources": _merge_sources(role.sources)}, deep=True)
+        people[key] = role
+    return [people[key] for key in sorted(people, key=lambda key: tuple(str(value) for value in key))]
 
 
 def _portfolio_headquarters_companies(known: list[Entity], enriched: list[Entity | None]) -> dict[str, Entity]:

@@ -2366,6 +2366,14 @@
             "type": "array",
             "title": "Allocation"
           },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "type": "array",
+            "title": "People",
+            "description": "Already retrieved, source-backed person-organisation roles for graph display; missing validity dates and current status remain unknown."
+          },
           "error": {
             "anyOf": [
               {

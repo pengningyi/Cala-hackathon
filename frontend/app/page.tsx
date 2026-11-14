@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react";
 import {
   ArrowDown, ArrowLeft, ArrowRight, Building2, Check, CheckCheck, ChevronDown,
@@ -9,9 +10,10 @@ import {
 import { ApiError, confirmCompanyMatches, findCompanyMatches, getHealth, getRunResult, startRun, subscribeRunEvents } from "../lib/api";
 import type { CandidateCard, CompanyMatches, Entity, FounderInput, InvestorStatus, OnboardingConfirmation, ProgressEvent, RunResult, RunStatus, Source } from "../lib/types";
 import ResultsWorkspace from "../components/results-workspace";
-import { ACTION_LABELS, ORIGIN_LABELS, hopDates, hopText } from "../lib/trust-labels";
+import { ORIGIN_LABELS, hopDates, hopText } from "../lib/trust-labels";
 import { ActionLadder, RuleChecklist } from "../components/score-explainer";
 import EntityMetadata, { EntityIdentity } from "../components/entity-metadata";
+import { activeRunStage, RUN_STAGES } from "../lib/run-progress";
 
 type Phase = "identify" | "matches" | "details" | "running" | "results";
 type StatusRow = { investor_name: string; investor_id?: string; status: InvestorStatus };
@@ -35,7 +37,6 @@ const STATUS_LABELS: Record<InvestorStatus, string> = {
   conditional_interest: "Conditional interest", already_approached: "Already approached",
   in_conversation: "In conversation", declined: "Declined this round", do_not_contact: "Do not contact",
 };
-const STEPS = ["Lead network", "Candidate profiles", "Fit & considerations", "Introduction plan"];
 const EUR = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
 const money = (value: string | number | null | undefined) => value == null ? "Unknown" : EUR.format(Number(value));
 const label = (value: string) => value.replaceAll("_", " ");
@@ -167,11 +168,9 @@ function Trace({ events, live = false }: { events: ProgressEvent[]; live?: boole
 function TrustSection({ card, busy, onConfirmLoop }: { card: CandidateCard; busy: boolean; onConfirmLoop?: (card: CandidateCard, loopId: string, confirmed: boolean) => void }) {
   const loops = card.loops || [];
   return <div className="card-section trust-section"><h4><Network size={14} />How reachable they are</h4>
-    <p className="trust-summary"><strong>{card.trust == null ? "Trust unknown" : `Trust ${card.trust.toFixed(2)}`}</strong>
-      {card.recommended_action && <span className={`workspace-action-chip action-${card.recommended_action}`}>{ACTION_LABELS[card.recommended_action]}{card.action_contact ? ` · ${card.action_contact.name}` : ""}</span>}</p>
     {card.trust == null ? <p className="small-muted">Cala returned no people data connecting you to this investor. Nothing is inferred.</p>
       : !loops.length ? <p className="small-muted">No mutual connection within four steps was found in the retrieved roles.</p>
-      : <ul className="trust-loops">{loops.map(loop => <li key={loop.id}><div className="trust-loop-heading"><strong>{label(loop.kind)}{loop.closes_through_lead ? " · closes through your lead" : ""}</strong><span className="mono">strength {loop.strength.toFixed(2)}</span></div>
+      : <ul className="trust-loops">{loops.map(loop => <li key={loop.id}><div className="trust-loop-heading"><strong>{label(loop.kind)}{loop.closes_through_lead ? " · closes through your lead" : ""}</strong></div>
         <ol>{loop.hops.map((hop, idx) => <li key={idx}>{hopText(hop)} <span>{hopDates(hop, dateLabel)}</span><Sources sources={hop.sources} title="sources" /></li>)}</ol>
         <p className="small-muted">{loop.label}</p>
         {onConfirmLoop && loop.contact && <label className="check-row"><input type="checkbox" disabled={busy} checked={loop.confirmed} onChange={event => onConfirmLoop(card, loop.id, event.target.checked)} /><span>I know {loop.contact.name} (reruns the search)</span></label>}</li>)}</ul>}
@@ -194,11 +193,6 @@ function Candidate({ card, index, onExclude, onConfirmLoop, busy, initiallyExpan
       <ul>{card.flags.map((flag, idx) => <li className={`main-score-flag main-score-flag-${flag.severity}`} key={`${flag.kind}-${idx}`}>
         <strong>{label(flag.kind)}</strong><p>{flag.reason}</p><Sources sources={flag.sources || []} title="sources" /></li>)}</ul></div> : null}
     {card.statuses.length > 0 && <div className="status-chips">{card.statuses.map(status => <span className="chip" key={status}>{STATUS_LABELS[status]}</span>)}</div>}
-    <div className="candidate-metrics"><div><span>Shared rounds</span><strong>{card.shared_round_count}</strong></div>
-      <div><span>Shared companies</span><strong>{card.shared_company_count}</strong></div>
-      <div><span>Rounds · last 12m</span><strong>{card.recent_rounds_12m ?? <span className="unknown">Unknown</span>}</strong></div>
-      {ruleScoring ? <div><span>Rules met</span><strong>{card.fit_score}</strong></div>
-        : <div><span>Profile completeness</span><strong>{Math.round(card.profile_completeness * 100)}<small>%</small></strong></div>}</div>
     {(card.origin_rounds || []).length > 0 && <div className="card-section"><h4><GitBranch size={14} />Your founder network</h4>
       <div className="status-chips">{(card.origins || []).map(origin => <span className="chip" key={origin}>{ORIGIN_LABELS[origin]}</span>)}</div>
       <div className="shared-deals">{card.origin_rounds!.map(deal => <div className="shared-deal" key={deal.id}><span className="small-dot" /><div><strong>{deal.company.name}</strong>
@@ -366,15 +360,14 @@ export default function Home() {
   function editProfile() { setPhase(identity ? "details" : matches ? "matches" : "identify"); setError(null); scrollTop(); }
   let previewGap: number | null = null;
   try { previewGap = Math.max(0, Number(euroAmount(form.target_eur, "Round target", true)) - Number(euroAmount(form.firm_commitments_eur, "Already committed"))); } catch { /* Show the preview after both amounts are valid. */ }
-  const latestStep = events.at(-1)?.step;
-  const activeStep = latestStep === "profiles" || latestStep === "trust" ? 1 : latestStep === "assessments" || latestStep === "scoring" ? 2 : latestStep === "complete" ? 3 : 0;
+  const activeStep = activeRunStage(events);
 
 
   return <div className="app-shell"><header className="topbar"><a className="brand" href="/" aria-label="RoundCloser home"><span className="brand-mark"><GitBranch size={20} strokeWidth={1.7} /></span>roundcloser<span className="brand-beta">BETA</span></a>
     <nav className="pill-nav" aria-label="Workflow"><button className={phase !== "results" ? "active" : ""} onClick={editProfile} disabled={phase === "running"}><Building2 size={14} /><span>Your round</span></button>
       <button className={phase === "results" ? "active" : ""} onClick={() => result && setPhase("results")} disabled={!result || phase === "running"}><Layers3 size={14} /><span>Your shortlist</span></button></nav>
     <div className="connection-badge"><span className={connected ? "connection-dot connected" : "connection-dot"} />{connected == null ? "Connecting to Cala" : connected ? "Powered by Cala" : "Cala not connected"}</div></header>
-    <main className={`main-panel ${phase === "results" ? "main-panel-results" : ""}`} ref={mainRef}><div className={`content-width ${phase === "results" ? "results-content" : ""}`}>
+    <main className={`main-panel ${phase === "results" ? "main-panel-results" : ""}`} ref={mainRef}><div className={`content-width ${phase === "results" ? "results-content" : phase === "running" ? "progress-content" : ""}`}>
       <div className="page-topline"><span className="eyebrow"><span className="small-dot" />A clearer path to your next introduction</span><span className="page-count mono">{phase === "results" ? "02 / 02" : "01 / 02"}</span></div>
       {phase !== "running" && phase !== "results" && <ol className="onboarding-progress" aria-label="Round setup progress">{["Find companies", "Confirm matches", "Complete your round"].map((step, index) => {
         const current = phase === "identify" ? 0 : phase === "matches" ? 1 : 2;
@@ -445,15 +438,15 @@ export default function Home() {
         {identity.notices.map((notice, index) => <div className="inline-note" key={index}><CircleHelp size={15} /><p>{notice}</p></div>)}
       </>}
 
-      {phase === "running" && <><div className="hero compact"><div><span className="running-label"><span className="live-dot" />Search in progress</span><h1>Following the connections.<br /><span>Building your shortlist.</span></h1><p>Retrieving shared rounds, reviewing investor context, and preparing your next ask.</p></div><div className="timer"><strong className="mono">{String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}</strong><span>of a 120-second target</span></div></div>
-        <div className="progress-steps">{STEPS.map((step, idx) => <div key={step} className={idx === activeStep ? "current" : idx < activeStep ? "done" : ""}><span>{idx < activeStep ? <Check size={13} /> : idx === activeStep ? <LoaderCircle size={13} className="spinning" /> : String(idx + 1).padStart(2, "0")}</span><strong>{step}</strong></div>)}</div>
-        <div className="workspace-grid progress-grid"><div><Trace events={events} live />{streamNotice && <div className="inline-note"><Radio size={15} /><p>The live trace is reconnecting. Result polling is still active.</p></div>}{error && <div className="error-banner" role="alert"><CircleHelp size={15} /><span>{error}</span></div>}{recoveryAvailable && <div className="recovery-actions" role="status"><p>The result is taking longer than expected, or this run is no longer available. You can return to your profile and start a fresh search.</p><button type="button" className="button secondary" onClick={() => { setRun(null); editProfile(); }}><ArrowLeft size={14} />Return to your profile</button></div>}</div><aside className="guidance-card progress-aside"><div className="dot-loader" aria-hidden="true">{Array.from({ length: 25 }, (_, idx) => <i key={idx} style={{ animationDelay: `${(idx % 5 + Math.floor(idx / 5)) * .12}s` }} />)}</div><h3>A useful shortlist<br />can be a short one.</h3><p>We return up to five investors with sourced connections: a shared round with your lead, your own cap table, or a founder's previous company. When evidence is sparse, you&apos;ll see fewer results and clear gaps.</p><div className="guidance-divider" /><p className="small-muted">The timer started with your confirmation. Unfinished profiles remain incomplete; they are never silently rejected.</p></aside></div></>}
+      {phase === "running" && <><div className="hero compact"><div><span className="running-label"><span className="live-dot" />Search in progress</span><h1>Following the connections.<br /><span>Building your shortlist.</span></h1><p>Exploring your lead and founder networks, reviewing investor evidence, and preparing your shortlist and requests.</p></div><div className="timer"><strong className="mono">{String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}</strong><span>of a 120-second target</span></div></div>
+        <div className="progress-steps" role="list" aria-label="Search progress">{RUN_STAGES.map((step, idx) => <div role="listitem" aria-current={idx === activeStep ? "step" : undefined} key={step} className={idx === activeStep ? "current" : idx < activeStep ? "done" : ""}><span>{idx < activeStep ? <Check size={13} /> : idx === activeStep ? <LoaderCircle size={13} className="spinning" /> : String(idx + 1).padStart(2, "0")}</span><strong>{step}</strong></div>)}</div>
+        <div className="workspace-grid progress-grid"><div><Trace events={events} live />{streamNotice && <div className="inline-note"><Radio size={15} /><p>The live trace is reconnecting. Result polling is still active.</p></div>}{error && <div className="error-banner" role="alert"><CircleHelp size={15} /><span>{error}</span></div>}{recoveryAvailable && <div className="recovery-actions" role="status"><p>The result is taking longer than expected, or this run is no longer available. You can return to your profile and start a fresh search.</p><button type="button" className="button secondary" onClick={() => { setRun(null); editProfile(); }}><ArrowLeft size={14} />Return to your profile</button></div>}</div><aside className="guidance-card progress-aside"><picture className="progress-network-picture"><source media="(prefers-reduced-motion: reduce)" srcSet="/obsidian-graph.jpg" /><Image unoptimized className="progress-network-image" src="/obsidian-network.gif" alt="Illustration of an interconnected network of nodes" width={600} height={600} /></picture><div className="progress-aside-copy"><h3>A useful shortlist<br />can be a short one.</h3><p>We return up to five investors with sourced connections: a shared round with your lead, your own cap table, or a founder's previous company. When evidence is sparse, you&apos;ll see fewer results and clear gaps.</p><div className="guidance-divider" /><p className="small-muted">The timer started with your confirmation. Unfinished profiles remain incomplete; they are never silently rejected.</p></div></aside></div></>}
 
       {phase === "results" && result && <ResultsWorkspace key={result.run_id} result={result} busy={busy} error={error}
         onEdit={editProfile} onRerun={() => void beginRun(result.profile)}
         renderInvestorDetails={(card, index) => <Candidate card={card} index={index} initiallyExpanded scoringVersion={result.scoring_version} busy={busy} onExclude={candidate => void exclude(candidate)} onConfirmLoop={(candidate, loopId, confirmed) => void confirmLoop(candidate, loopId, confirmed)} />}
         renderSources={sources => <Sources sources={sources} title="sources" />} trace={<Trace events={events} />} />}
-      <footer className="page-footer"><span>roundcloser</span><p>Connections backed by Cala. Introductions guided by you.</p><span className="mono">MVP · EUR</span></footer>
+      <footer className="page-footer"><span>roundcloser</span><span className="footer-support">Supported by Cala AI</span></footer>
     </div></main></div>;
 }
 

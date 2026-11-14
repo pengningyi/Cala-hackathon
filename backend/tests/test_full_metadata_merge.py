@@ -267,4 +267,17 @@ def test_owner_country_rule_uses_headquarters_while_cards_keep_complete_metadata
         sector = next(item for item in card.components if item.name == "sector_match")
         assert sector.known and sector.value == 1
         assert provider.company.country == "Spain"
+        events = record.trace.events
+        context_events = [event for event in events if event.step == "company_context"]
+        if context_limit:
+            metadata_calls = [event for event in events if event.type == "tool_call" and event.tool == "entity_metadata"
+                              and event.query.get("entity_id") == "portfolio"]
+            assert len(metadata_calls) == 1 and metadata_calls[0].step == "company_context"
+            assert context_events[0].type == context_events[-1].type == "progress"
+            assert context_events[0].id < metadata_calls[0].id < context_events[-1].id
+        else:
+            assert context_events == []
+        stages = {event.step: event.id for event in events}
+        assert stages["scoring"] < stages["loops"] < stages["finalizing"] < stages["complete"]
+        assert sum(event.step == "finalizing" for event in events) == 1
     asyncio.run(scenario())

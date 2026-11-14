@@ -203,6 +203,20 @@ lookback, counters, notices, individual candidate cards, explicit exclusions,
 incomplete entities, combined draft, timing, Cala tool-call count, cache hits,
 retrieval timestamps, scoring version and optional structured error.
 
+`people` is a default-empty list of already retrieved, source-backed `Role`
+records for graph display. Each record preserves the person and organisation
+entities, role kind, `valid_since`, `valid_until`, explicit `current` flag and
+the role's own sources. It includes available founder, lead-fund, candidate-fund
+and intermediate organisation roles without additional Cala calls. Duplicate
+roles merge only when person ID, organisation ID, kind, dates and current flag
+all match; names alone never merge identities. Source publication/retrieval dates
+do not establish when a role was held, and `current: false` is not a claim of a
+current affiliation. Empty or partial lists describe retrieved evidence rather
+than complete coverage. A founder name entered in the form does not create a
+verified person node. Trust-loop contacts can be companies, so clients must not
+render every `loop.contact` as a person. This display snapshot does not change
+scores, rankings or allocations, and older results without `people` remain valid.
+
 Each card contains score components with known/unknown state, weights,
 numerators/denominators and sources; completeness separately; distinct shared
 round/company counts; up to three shared deals; recent activity; full profile

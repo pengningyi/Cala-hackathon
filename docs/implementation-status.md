@@ -1,5 +1,46 @@
 # Branch-basic implementation and verification
 
+## Physical graph exploration — 14 November 2026
+
+Nodes now use springs, neighbor repulsion and collisions that account for their
+current visual size. Dragging pins a body temporarily; release returns it toward
+its hub. Expansion promotes a node to a hub and reveals up to eight additional
+neighbors from the saved, sourced result. Multiple hubs can remain expanded;
+collapse preserves neighbors still required by another hub or the initial view.
+Expanded views are bounded to 72 nodes and 60 people, without new API/model calls.
+
+Zoom progressively shows points, entity icons and named detail cards. Wheel,
+trackpad/touch pinch, buttons and keyboard navigation retain the selected context.
+The simulation stops when settled or offscreen, pauses when the tab is hidden,
+and settles without animated bursts when reduced motion is requested.
+
+The production build and all 56 selected frontend checks passed, including 14
+physics cases, 31 evidence/expansion cases and 11 browser workflow cases. A saved
+Cala replay expanded from 27 to 35 nodes and verified all three detail levels,
+wheel zoom, mobile selection and an error-free browser console.
+
+## Entity-based knowledge graph — 14 November 2026
+
+The graph now represents people as squares and organizations as circles, without
+the former column headings or funding-event nodes. Each funding edge connects
+an identified investor to the actual recipient company and retains the event,
+date and source evidence. Sourced person roles connect founders, investor staff
+and common contacts; companies in founder-network paths remain organizations.
+
+Any node or connection can be selected and toggled, and nodes can be dragged.
+Node size measures distinct neighbors in the displayed, bounded view, rather
+than ranking score or repeated references to the same entity. A visible notice
+identifies truncated views. Missing people data does not create inferred people.
+
+The backend's optional `people` result field preserves roles already retrieved
+for discovery and scoring, including source links, metadata and validity dates.
+This adds no Cala requests and does not change ranking, scores or allocations.
+
+Verification: 293 backend tests, 25 graph-model checks, two graph/workspace browser
+checks and the production build passed. A replay of saved Cala evidence verified
+mouse toggling and mobile access for all 27 displayed entities, clickable funding
+and affiliation sources, and a layout without overlapping label boxes.
+
 ## Current owner merge — 14 November 2026
 
 Current source baseline: owner `branch-basic` at `df78081`, including the owner's

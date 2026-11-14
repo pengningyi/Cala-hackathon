@@ -197,6 +197,7 @@ def test_no_open_allocation_skips_every_cala_call(tmp_path, committed):
         assert record.result.remaining_allocation_eur == 0
         assert record.result.cala_calls == 0 and provider.calls == []
         assert record.result.candidates == []
+        assert [event.step for event in record.trace.events] == ["confirmation", "complete"]
     asyncio.run(scenario())
 
 

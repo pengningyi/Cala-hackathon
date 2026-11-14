@@ -104,7 +104,7 @@ export async function getHealth(): Promise<Health> {
   return readJson<Health>(await fetchApi("/api/health"));
 }
 
-const eventTypes = ["progress", "tool_call", "tool_result", "retry", "notice", "complete"] as const;
+const eventTypes = ["progress", "tool_call", "tool_result", "retry", "notice", "loops", "complete"] as const;
 
 function parseEvent(message: MessageEvent<string>): ProgressEvent {
   const value: unknown = JSON.parse(message.data);

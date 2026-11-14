@@ -68,7 +68,7 @@ test("real Cala search streams, copies follow-up drafts and reruns a do-not-cont
   const rows = page.locator(".workspace-investor-row");
   expect(await rows.count()).toBeGreaterThan(0);
   expect(await rows.count()).toBeLessThanOrEqual(5);
-  await expect(page.locator(".workspace-hero")).toContainText("Provisional lead");
+  await expect(page.locator(".workspace-summary")).toContainText("Provisional");
   await expect(page.getByRole("heading", { name: "Your round assistant", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Founder and investor knowledge graph" })).toBeVisible();
   const chatBox = await page.locator(".workspace-chat-panel").boundingBox();
@@ -96,8 +96,8 @@ test("real Cala search streams, copies follow-up drafts and reruns a do-not-cont
   await page.getByRole("button", { name: "Zoom graph in", exact: true }).click();
   expect(await page.locator(".kg-canvas > g").getAttribute("transform")).not.toBe(graphTransform);
   await page.getByRole("button", { name: "Reset graph view", exact: true }).click();
-  await page.getByRole("button", { name: /^Identified funding round:/ }).first().click();
-  await expect(page.locator(".kg-inspector")).toContainText("Recipient:");
+  await page.locator("[data-kg-edge]").filter({ has: page.locator(".kg-edge-investment") }).first().click();
+  await expect(page.locator(".kg-inspector")).toContainText("Recipient");
   expect(await page.locator(".kg-inspector .kg-source-list a").count()).toBeGreaterThan(0);
   await page.screenshot({ path: ".qa/results-workspace-desktop.png", fullPage: true });
   for (const width of [768, 390]) {

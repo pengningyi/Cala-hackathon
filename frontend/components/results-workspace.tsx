@@ -83,8 +83,7 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
     <div className="results-top workspace-top"><button className="back-link" onClick={onEdit}><ArrowLeft size={14} />Adjust your round</button>
       <div className="workspace-top-actions">{result.combined_draft && <CopyRequest text={result.combined_draft} label={`Copy ${Math.min(3, eligibleCount)}-investor request`} />}
         <button type="button" className="button text-button" disabled={busy} onClick={onRerun}><RotateCcw size={13} />Rerun search</button></div></div>
-    <div className="hero workspace-hero"><div><div className="eyebrow">{result.state === "partial" ? "Partial results · available evidence" : "Your introduction workspace"}</div>
-      <h1>{heading}</h1><p>{result.lead ? `Connected through ${result.lead.name} · ${result.lookback_months}-month lookback` : "No co-investor search was needed."}{result.profile.round.lead_status === "unconfirmed" ? " · Current-round commitment unconfirmed" : provisional && " · Provisional lead"}</p></div></div>
+    <div className="hero workspace-hero"><h1>{heading}</h1></div>
     <div className="summary-strip workspace-summary"><div><span>Remaining allocation</span><strong>{money(result.remaining_allocation_eur)}</strong></div>
       <div><span>Firm commitments</span><strong>{money(result.profile.round.firm_commitments_eur)}</strong></div>
       <div><span>Round target</span><strong>{money(result.profile.round.target_eur)}</strong></div>

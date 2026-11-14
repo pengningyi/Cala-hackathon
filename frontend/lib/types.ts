@@ -202,6 +202,16 @@ export interface InvestmentObservation {
   sources: Source[];
 }
 
+export interface Role {
+  person: Entity;
+  org: Entity;
+  kind: "works_at" | "member_of" | "board" | "founded" | "studied_at";
+  valid_since: string | null;
+  valid_until: string | null;
+  current: boolean;
+  sources: Source[];
+}
+
 export interface InvestorProfile {
   investor: Entity;
   rounds: FundingRound[];
@@ -211,12 +221,14 @@ export interface InvestorProfile {
   mandates: Mandate[];
   assessments: Assessment[];
   sources: Source[];
+  people?: Role[];
 }
 
 export interface GraphSnapshot {
   lead?: Entity | null;
   rounds: FundingRound[];
   complete: boolean;
+  people?: Role[];
 }
 
 export interface ScoreComponent {
@@ -349,6 +361,8 @@ export interface RunResult {
   remaining_allocation_eur: DecimalString;
   lookback_months: number;
   candidates: CandidateCard[];
+  /** Retrieved person/organization roles, with dates and their own evidence. */
+  people?: Role[];
   exclusions: Exclusion[];
   incomplete: Entity[];
   counts: Record<string, number>;

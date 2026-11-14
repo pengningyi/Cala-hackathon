@@ -434,6 +434,7 @@ class RunResult(Model):
     retrieval_timestamps: list[datetime]
     scoring_version: str = "rules-2026-11"
     allocation: list[AllocationItem] = Field(default_factory=list)
+    people: list[Role] = Field(default_factory=list, description="Already retrieved, source-backed person-organisation roles for graph display; missing validity dates and current status remain unknown.")
 
     error: dict[str, Any] | None = None
 
