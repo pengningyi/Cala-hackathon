@@ -1,4 +1,4 @@
-# RoundCloser
+# RoundMe
 
 **An AI agent that helps startup founders fill the rest of a funding round.** You give
 it your lead investor. In about two minutes it returns up to five other investors likely
@@ -24,7 +24,7 @@ Founders usually do this by hand: they read news articles, scroll investor datab
 and guess who knows whom. It is slow and unreliable, and the founder has nothing
 concrete to show the lead when asking for introductions.
 
-## What RoundCloser does
+## What RoundMe does
 
 | Step | The founder… | The agent… |
 |---|---|---|
@@ -41,9 +41,9 @@ concrete to show the lead when asking for introductions.
 ### 1. It treats fundraising as a network problem, not a search problem
 
 Most investor tools give you a filtered list: "seed-stage fintech investors in Europe".
-RoundCloser asks a different question: **who has actually invested alongside your lead,
+RoundMe asks a different question: **who has actually invested alongside your lead,
 in the same funding round?** Those investors already know and trust your lead, so an
-introduction from the lead is far more likely to work. RoundCloser follows the
+introduction from the lead is far more likely to work. RoundMe follows the
 relationships in Cala's knowledge graph to find them.
 
 ### 2. It looks in three networks at once
@@ -93,7 +93,7 @@ explore and question the result.
 ### In the product: an agent with guardrails
 
 - **The agent works through MCP.** Model Context Protocol is the standard way AI agents
-  connect to outside tools and data. RoundCloser discovers Cala's tools automatically
+  connect to outside tools and data. RoundMe discovers Cala's tools automatically
   and checks every request against the tool's own published format before sending it.
 - **AI and code each do the job they are best at.** The AI model reads evidence to judge
   sector overlap, answers questions in the chat and helps with wording. Deterministic
@@ -192,7 +192,7 @@ More detail: [backend](backend/README.md) · [frontend](frontend/README.md) ·
 
 ## Limitations
 
-- RoundCloser shows that investors have worked with your lead before. It cannot tell
+- RoundMe shows that investors have worked with your lead before. It cannot tell
   whether they will invest this time.
 - A warm path means two people had public roles at the same organisation at the same
   time. It does not prove they know each other, which is why the founder confirms

@@ -339,7 +339,7 @@ test("canvas nodes open a pointer menu and graph export and fullscreen remain ke
   const downloadEvent = page.waitForEvent("download");
   await graph.getByRole("button", { name: "Export graph as PNG", exact: true }).click();
   const download = await downloadEvent;
-  expect(download.suggestedFilename()).toBe("roundcloser-connections.png");
+  expect(download.suggestedFilename()).toBe("roundme-connections.png");
   expect(await download.failure()).toBeNull();
   await graph.getByRole("button", { name: "Expand graph view", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Founder and investor knowledge graph", exact: true });

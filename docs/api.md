@@ -1,4 +1,4 @@
-# RoundCloser HTTP contract v0.1
+# RoundMe HTTP contract v0.1
 
 Base URL: `http://127.0.0.1:8000`. Schemas are generated at `/openapi.json` and
 interactive requests are available at `/docs`. Amounts are decimal EUR, serialized

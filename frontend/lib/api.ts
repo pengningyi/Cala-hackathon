@@ -39,7 +39,7 @@ async function fetchApi(path: string, init: RequestInit = {}): Promise<Response>
     response = await fetch(path, { ...init, headers, cache: "no-store", credentials: "same-origin" });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw error;
-    throw new ApiError("network_error", "Could not reach RoundCloser. Check the connection and try again.");
+    throw new ApiError("network_error", "Could not reach RoundMe. Check the connection and try again.");
   }
   if (!response.ok) {
     let payload: unknown;

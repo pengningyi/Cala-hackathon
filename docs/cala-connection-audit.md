@@ -10,7 +10,7 @@ arguments and retrieval timestamps are in ignored
 ## Main finding
 
 Cala has useful company, funding-event, founder, employment, board and membership
-edges. RoundCloser currently uses only a small part of this graph. We can improve
+edges. RoundMe currently uses only a small part of this graph. We can improve
 the existing lead-connected shortlist through better funding-event discovery, and
 add clearly labelled founder-network paths as a separate expansion.
 
@@ -23,7 +23,7 @@ current investment appetite or a commitment to the founder's current round.
 The live MCP server advertised six tools. Five data tools were exercised; external
 identifier lookup was inspected in the tool schema but not called.
 
-| Tool | Use for RoundCloser | What this audit established |
+| Tool | Use for RoundMe | What this audit established |
 | --- | --- | --- |
 | `entity_search` | Resolve company, investor and person identities | Altimeter search returned multiple legal entities and vehicles, requiring identity confirmation |
 | `entity_introspection` | Discover fields and edge types before retrieval | Available edges differ substantially across Cala, Lightspeed, Altimeter and individual people |

@@ -1,4 +1,4 @@
-# RoundCloser: connection improvement plan
+# RoundMe: connection improvement plan
 
 **Date:** 14 November 2026
 

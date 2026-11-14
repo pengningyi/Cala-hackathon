@@ -363,7 +363,7 @@ export default function Home() {
   const activeStep = activeRunStage(events);
 
 
-  return <div className="app-shell"><header className="topbar"><a className="brand" href="/" aria-label="RoundCloser home"><span className="brand-mark"><GitBranch size={20} strokeWidth={1.7} /></span>roundcloser<span className="brand-beta">BETA</span></a>
+  return <div className="app-shell"><header className="topbar"><a className="brand" href="/" aria-label="RoundMe home"><span className="brand-mark"><GitBranch size={20} strokeWidth={1.7} /></span>roundme<span className="brand-beta">BETA</span></a>
     <nav className="pill-nav" aria-label="Workflow"><button className={phase !== "results" ? "active" : ""} onClick={editProfile} disabled={phase === "running"}><Building2 size={14} /><span>Your round</span></button>
       <button className={phase === "results" ? "active" : ""} onClick={() => result && setPhase("results")} disabled={!result || phase === "running"}><Layers3 size={14} /><span>Your shortlist</span></button></nav>
     <div className="connection-badge"><span className={connected ? "connection-dot connected" : "connection-dot"} />{connected == null ? "Connecting to Cala" : connected ? "Powered by Cala" : "Cala not connected"}</div></header>
@@ -446,7 +446,7 @@ export default function Home() {
         onEdit={editProfile} onRerun={() => void beginRun(result.profile)}
         renderInvestorDetails={(card, index) => <Candidate card={card} index={index} initiallyExpanded scoringVersion={result.scoring_version} busy={busy} onExclude={candidate => void exclude(candidate)} onConfirmLoop={(candidate, loopId, confirmed) => void confirmLoop(candidate, loopId, confirmed)} />}
         renderSources={sources => <Sources sources={sources} title="sources" />} trace={<Trace events={events} />} />}
-      <footer className="page-footer"><span>roundcloser</span><span className="footer-support">Supported by Cala AI</span></footer>
+      <footer className="page-footer"><span>roundme</span><span className="footer-support">Supported by Cala AI</span></footer>
     </div></main></div>;
 }
 

@@ -1,12 +1,12 @@
 # Architecture and orchestration
 
-This document explains how RoundCloser is put together, how one agent run is
+This document explains how RoundMe is put together, how one agent run is
 orchestrated from start to finish, and which engineering choices are new. The [README](../README.md) has the plain-language overview. The
 [HTTP API](api.md) lists every request and response field.
 
 ## Highlights
 
-RoundCloser is an agentic system with a strict division of labour. The **agent** decides
+RoundMe is an agentic system with a strict division of labour. The **agent** decides
 what to retrieve, within a hard budget. **Deterministic code** makes every decision.
 The **language model** does only language and judgement tasks whose output can be
 checked. The innovation is in what the agent looks for: relationships in a knowledge

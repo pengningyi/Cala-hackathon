@@ -48,7 +48,7 @@ export default function GraphCanvas({ data, width, height, apiRef, selectedId, n
       const canvas = document.createElement("canvas"); canvas.width = source.width; canvas.height = source.height;
       const ctx = canvas.getContext("2d"); if (!ctx) return;
       ctx.fillStyle = "#fcfbfe"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(source, 0, 0);
-      const link = document.createElement("a"); link.download = "roundcloser-connections.png"; link.href = canvas.toDataURL("image/png"); link.click();
+      const link = document.createElement("a"); link.download = "roundme-connections.png"; link.href = canvas.toDataURL("image/png"); link.click();
     },
   }));
 

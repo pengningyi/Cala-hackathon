@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "RoundCloser API",
+    "title": "RoundMe API",
     "description": "Resolve a Cala lead, confirm the founder profile, and start a bounded co-investor search.",
     "version": "0.1.0"
   },

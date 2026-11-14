@@ -1,1 +1,1 @@
-"""RoundCloser backend. Public facts come exclusively from Cala."""
+"""RoundMe backend. Public facts come exclusively from Cala."""

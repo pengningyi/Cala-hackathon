@@ -168,7 +168,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
       <button type="button" onClick={() => onSelectInvestor(null)} aria-label="Clear selected investor"><X size={13} /></button></div>}
     <div className="rc-chat-thread" ref={threadRef} role="log" aria-label="Conversation about your shortlist" aria-live="polite" aria-relevant="additions text" aria-busy={busy}>
       {messages.map(message => <div className={`rc-chat-message rc-chat-message-${message.role}${message.failed ? " rc-chat-message-failed" : ""}`} key={message.id}>
-        <span className="rc-chat-role">{message.role === "user" ? "You" : <><Sparkles size={11} />RoundCloser</>}</span>
+        <span className="rc-chat-role">{message.role === "user" ? "You" : <><Sparkles size={11} />RoundMe</>}</span>
         <div className="rc-chat-bubble"><p>{message.content}</p>
           {message.failed && <span className="rc-chat-not-sent">No answer received. Your question is ready to retry.</span>}
           {message.candidateIds.length > 0 && <div className="rc-chat-investors" aria-label="Investors referenced in this answer">{message.candidateIds.map(id => {

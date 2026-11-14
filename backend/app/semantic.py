@@ -156,7 +156,7 @@ class CodexSemantic:
         if executable is None:
             raise SemanticError("Codex CLI is not installed or not on PATH")
         prompt, allowed = _facts(founder, profiles)
-        with tempfile.TemporaryDirectory(prefix="roundcloser-semantic-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="roundme-semantic-") as temporary:
             directory = Path(temporary)
             schema_path = directory / "output-schema.json"
             output_path = directory / "output.json"

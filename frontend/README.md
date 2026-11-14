@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js and React application for the working RoundCloser API. Requires Node 20.9+
+Next.js and React application for the working RoundMe API. Requires Node 20.9+
 and a separately running backend on port 8000.
 
 ```powershell

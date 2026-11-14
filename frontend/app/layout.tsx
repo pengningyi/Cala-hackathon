@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RoundCloser · Your next introduction",
+  title: "RoundMe · Your next introduction",
   description: "Turn your lead investor's Cala-backed investment network into considered introduction requests.",
 };
 

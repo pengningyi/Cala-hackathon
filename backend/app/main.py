@@ -70,7 +70,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
         yield
         await workflow.close()
 
-    app = FastAPI(title="RoundCloser API", version="0.1.0", lifespan=lifespan,
+    app = FastAPI(title="RoundMe API", version="0.1.0", lifespan=lifespan,
                   description="Resolve a Cala lead, confirm the founder profile, and start a bounded co-investor search.")
     app.state.workflow = workflow
     app.state.chat = chat_service
