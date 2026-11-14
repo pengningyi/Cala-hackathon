@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from .cala import CalaError, CalaMCPProvider
 from .entity_metadata import date_value as _date, parse_entity as _entity, property_value as _value, sources as _sources
-from .models import DetectedLead, Entity, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation
+from .models import DetectedLead, Entity, EntityMetadataProperty, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation
 from .runtime import BudgetExceeded
 
 
@@ -154,7 +154,48 @@ class CalaNativeProvider:
     async def entity_metadata(self, entity_id: str, company: bool = False) -> Entity:
         """Retrieve available properties without expanding unrelated graph paths."""
         response, _ = await self._entity_projection(entity_id, investment_edges=False)
-        return _entity(response.data, response.retrieved_at, company=company, metadata_retrieved=True)
+        entity = _entity(response.data, response.retrieved_at, company=company, metadata_retrieved=True)
+        # Industry is a sourced relationship in Cala, rather than a company
+        # property. Keep that explicit classification available for onboarding.
+        edges = response.data.get("relationships", {}).get("outgoing", {}).get("OPERATES_IN_INDUSTRY", [])
+        if not isinstance(edges, list):
+            return entity
+        industries, ambiguous = {}, set()
+        for edge in edges:
+            if not isinstance(edge, dict) or edge.get("entity_type") != "Industry":
+                continue
+            if not isinstance(edge.get("properties", {}), dict):
+                continue
+            identifier, name = edge.get("id"), edge.get("name")
+            if not isinstance(identifier, str) or not identifier.strip() or not isinstance(name, str) or not name.strip():
+                continue
+            name = name.strip()
+            since_raw, until_raw = _value(edge, "valid_since"), _value(edge, "valid_until")
+            since, until = _date(since_raw), _date(until_raw)
+            if ((since_raw is not None and since is None) or (until_raw is not None and until is None)
+                    or (since and since > response.retrieved_at.date())
+                    or (until and until < response.retrieved_at.date())):
+                continue
+            refs = _sources(edge, response.retrieved_at)
+            if not refs:
+                continue
+            if identifier in industries and industries[identifier][0] != name:
+                ambiguous.add(identifier)
+                continue
+            prior = industries.get(identifier, (name, []))[1]
+            industries[identifier] = (name, [*prior, *refs])
+        labels, references = [], {}
+        for identifier, (name, refs) in industries.items():
+            if identifier in ambiguous:
+                continue
+            if name not in labels:
+                labels.append(name)
+            for source in refs:
+                references.setdefault((str(source.url), source.published_at, source.retrieved_at), source)
+        if labels:
+            entity.metadata.append(EntityMetadataProperty(
+                name="operates_in_industry", value=labels, sources=list(references.values())))
+        return entity
 
     async def detect_lead(self, company_id: str) -> DetectedLead | None:
         """Suggest a lead only from an identified company event and explicit lead role.

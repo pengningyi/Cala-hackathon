@@ -5,7 +5,7 @@ import { ArrowLeft, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Copy, Fil
 import type { CandidateCard, RunResult, Source } from "../lib/types";
 import AgentInsights from "./agent-insights";
 import ResultsGraph from "./results-graph";
-import AllocationPanel from "./allocation-panel";
+import AllocationSummary, { InvestorAllocation } from "./allocation-panel";
 
 interface Props {
   result: RunResult;
@@ -65,6 +65,7 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
   const count = result.candidates.length;
   const provisional = result.profile.round.lead_status === "conditional" || result.profile.round.lead_status === "unconfirmed";
   const eligibleCount = result.candidates.filter(card => card.review_status !== "flagged").length;
+  const displayError = error || (result.error && String(result.error.message || "Search unavailable"));
   const heading = count ? "Your introduction workspace." : result.state === "no_open_allocation"
     ? "Your round has no open allocation." : result.state === "failed" ? "The search couldn’t finish." : "No connections to recommend yet.";
 
@@ -87,14 +88,11 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
       <div><span>Lead commitment</span><strong className="text-metric">{result.profile.round.lead_status === "unconfirmed" ? "Unconfirmed" : provisional ? "Provisional" : result.profile.round.lead_status.replaceAll("_", " ")}</strong></div></div>
     <div className="result-meta"><span>{result.counts.discovered ?? 0} discovered · {result.counts.profiled ?? 0} profiled · {eligibleCount} ready · {count - eligibleCount} need review · {result.counts.excluded ?? 0} excluded · {result.counts.incomplete ?? 0} incomplete</span>
       <span className="mono">{(result.processing_ms / 1000).toFixed(1)}s · {result.cala_calls} Cala calls · {result.cache_hits} cache hits</span></div>
-    {(result.notices.length > 0 || result.error) && <details className="notices workspace-notices" open={result.state === "failed"}><summary><CircleHelp size={15} />{result.state === "partial" ? "Search coverage & what remains unknown" : "Search notes"}<ChevronDown size={13} /></summary>
-      <ul>{result.notices.map((notice, i) => <li key={i}>{notice}</li>)}{result.error && <li>{String(result.error.message || "Search unavailable")}</li>}</ul></details>}
-    {error && <div className="error-banner" role="alert"><CircleHelp size={15} /><span>{error}</span></div>}
+    {displayError && <div className="error-banner" role="alert"><CircleHelp size={15} /><span>{displayError}</span></div>}
 
     <div className="result-workspace">
-      <div className="workspace-chat-panel"><AgentInsights key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={setSelectedInvestorId} trace={trace} /></div>
       <section className="workspace-shortlist" aria-labelledby="workspace-shortlist-heading">
-        <div className="shortlist-heading workspace-panel-heading"><div><h2 id="workspace-shortlist-heading">Your top investors</h2><p>Up to five, scored with supporting evidence</p></div><span className="workspace-count mono">{count} / 5</span></div>
+        <div className="shortlist-heading workspace-panel-heading"><div><h2 id="workspace-shortlist-heading">Your top investors</h2><p>Scores and estimated allocation · {money(result.remaining_allocation_eur)} open</p></div><span className="workspace-count mono">{count} / 5</span></div>
         <div className="workspace-investor-list">{result.candidates.map((card, index) => <div key={card.investor.id} className={`workspace-investor-row ${selectedInvestorId === card.investor.id ? "is-selected" : ""}`}>
           <button type="button" className="workspace-investor-select" aria-label={`Select ${card.investor.name}`} aria-pressed={selectedInvestorId === card.investor.id} onClick={() => setSelectedInvestorId(card.investor.id)}>
             <span className="workspace-rank mono">{String(index + 1).padStart(2, "0")}</span><span className="workspace-investor-name"><strong title={card.investor.name}>{card.investor.name}</strong>{card.review_status === "flagged" && <span className="workspace-review-status">Needs review</span>}
@@ -102,17 +100,18 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
             <span className="workspace-investor-score" title="Introduction priority, not an investment probability">{card.fit_score}<small>/100</small></span></button>
           <CopyRequest text={card.draft} label={`Copy request for ${card.investor.name}`} compact />
           <button type="button" className="button workspace-icon-button" aria-label={`View details for ${card.investor.name}`} title="Evidence, fit & draft" onClick={() => showDetails(card.investor.id)}><ChevronRight size={17} /></button>
+          <InvestorAllocation card={card} allocation={result.allocation} />
         </div>)}</div>
+        <AllocationSummary result={result} />
         {!count && <div className="workspace-empty-shortlist"><Network size={25} /><h3>{result.state === "no_open_allocation" ? "Allocation is filled" : "No completed investor cards"}</h3>
           <p>{result.state === "no_open_allocation" ? "Firm commitments meet or exceed the target. Adjust your round if the allocation changes." : "Only investors with an identified shared round can appear here. Review the scope and exclusions or adjust your profile."}</p><button type="button" className="button text-button" onClick={onEdit}>Adjust profile<ChevronRight size={13} /></button></div>}
         <footer className="workspace-shortlist-footer"><span><FileCheck2 size={13} />Select to explore · open details for sources</span>
           {result.combined_draft && <button type="button" className="button text-button" onClick={() => setCombinedOpen(!combinedOpen)} aria-expanded={combinedOpen}>Combined request<ChevronDown size={13} /></button>}</footer>
         {combinedOpen && <div className="workspace-combined"><div><h3>Your combined request</h3><button type="button" className="button workspace-icon-button" aria-label="Close combined request" onClick={() => setCombinedOpen(false)}><X size={15} /></button></div><pre tabIndex={0}>{result.combined_draft}</pre><CopyRequest text={result.combined_draft} label="Copy combined request" /></div>}
       </section>
+      <div className="workspace-chat-panel"><AgentInsights key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={setSelectedInvestorId} trace={trace} /></div>
       <div className="workspace-graph-panel"><ResultsGraph result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={setSelectedInvestorId} /></div>
     </div>
-
-    <AllocationPanel result={result} />
 
     {(result.exclusions.length > 0 || result.incomplete.length > 0) && <div className="workspace-extra-results">
       {result.incomplete.length > 0 && <section className="supplementary"><h3>Incomplete profiles <span>{result.incomplete.length}</span></h3><p>These investors were not rejected; profiling did not finish in this run.</p>{result.incomplete.map(entity => <div className="supplementary-row" key={entity.id}><span>{entity.name}</span><span className="chip">Incomplete</span></div>)}</section>}

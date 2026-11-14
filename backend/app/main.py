@@ -13,11 +13,34 @@ from starlette.exceptions import HTTPException
 from .cala import CalaError, CalaMCPProvider
 from .cala_native import CalaNativeProvider
 from .config import Settings
-from .chat import ResultChat
-from .models import ChatRequest, ChatResponse, Resolution, ResolveRequest, RunResult, RunStatus, StartRunRequest
+from .chat_model import ChatModelError, LiveResultChat
+from .models import (
+    ChatRequest, ChatResponse, CompanyConfirmation, CompanyMatchRequest, CompanyMatches,
+    ConfirmCompanyMatches, Resolution, ResolveRequest, RunResult, RunStatus, StartRunRequest,
+)
 from .pipeline import Workflow, WorkflowError
 from .runtime import BudgetExceeded
 from .semantic import CodexSemantic, OpenAICompatibleSemantic
+
+
+async def _connected_chat_reply(service, result, payload, http_request):
+    """Stop model work promptly when its browser request disappears."""
+    async def disconnected():
+        while not await http_request.is_disconnected():
+            await asyncio.sleep(.1)
+
+    generation = asyncio.create_task(service.reply(result, payload))
+    connection = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait((generation, connection), return_when=asyncio.FIRST_COMPLETED)
+        if generation in done:
+            return generation.result()
+        raise WorkflowError("chat_client_disconnected", "Chat request was cancelled.", 499)
+    finally:
+        for task in (generation, connection):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(generation, connection, return_exceptions=True)
 
 
 def create_app(settings: Settings | None = None, provider=None, semantic=None, chat=None):
@@ -35,7 +58,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
         semantic = OpenAICompatibleSemantic(base_url=settings.model_base_url, api_key=settings.model_api_key,
                                             model=settings.model_name, timeout_seconds=settings.model_timeout_seconds)
     workflow = Workflow(settings, provider, semantic)
-    chat_service = chat or ResultChat()
+    chat_service = chat if chat is not None else LiveResultChat(settings)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -59,6 +82,10 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
     @app.exception_handler(CalaError)
     async def cala_error(request, exc):
         return error_response(exc.code, exc.message, 503 if exc.transient or exc.code == "cala_not_configured" else 502)
+
+    @app.exception_handler(ChatModelError)
+    async def chat_model_error(request, exc):
+        return error_response(exc.code, exc.message, exc.status)
 
     @app.exception_handler(BudgetExceeded)
     async def budget_error(request, exc):
@@ -93,6 +120,14 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
     @app.post("/api/resolve", response_model=Resolution)
     async def resolve(request: ResolveRequest):
         return await workflow.resolve(request)
+
+    @app.post("/api/onboarding/matches", response_model=CompanyMatches)
+    async def company_matches(request: CompanyMatchRequest):
+        return await workflow.match_companies(request)
+
+    @app.post("/api/onboarding/matches/{match_id}/confirm", response_model=CompanyConfirmation)
+    async def confirm_company_matches(match_id: str, request: ConfirmCompanyMatches):
+        return workflow.confirm_companies(match_id, request)
 
     @app.post("/api/runs", response_model=RunStatus, status_code=202)
     async def start_run(request: StartRunRequest):
@@ -138,7 +173,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
                                  headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
     @app.post("/api/runs/{run_id}/chat", response_model=ChatResponse)
-    async def result_chat(run_id: str, request: ChatRequest):
+    async def result_chat(run_id: str, request: ChatRequest, http_request: Request):
         run = workflow.get(run_id)
         if run.result is None:
             raise WorkflowError("run_not_ready", "Wait for the run result before asking about its shortlist", 409)
@@ -146,7 +181,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
             card.investor.id for card in run.result.candidates
         }:
             raise WorkflowError("invalid_chat_selection", "Select an investor from this run's shortlist")
-        return await chat_service.reply(run.result, request)
+        return await _connected_chat_reply(chat_service, run.result, request, http_request)
 
     return app
 

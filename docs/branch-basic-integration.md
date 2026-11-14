@@ -16,36 +16,40 @@ explicitly differ, especially scoring and suggested allocation.
 
 | Requested feature | Source and resulting behavior |
 | --- | --- |
-| Step-one information | Main's basic fields/defaults, optional lead, four stages and already-in investor exclusions, inside branch-one's form layout |
-| Chatbot | As clarified by the user, use main's Current understanding explanations and live agent trace in the upper-left panel, with tabs for insights and activity |
+| Setup | Company and lead names first, confirm both Cala identities, then complete sourced prefills and unknown fields inside branch-one's form layout |
+| Chatbot | Live model conversation via the configured Codex CLI or model API, alongside main's agent activity trace in the lower-left panel |
 | UI | Branch-one's typography, colors, confirmation, progress and three-panel results workspace |
 | Knowledge graph UI | Branch-one's interactive exact-event graph, selection, zoom, sources and mobile behavior |
 | Scoring | Main's server-side numerical rules and flags, adapted to the typed Cala snapshot |
 | Investing percentage | Main's greedy estimated allocation, showing percentages of the open amount and unallocated remainder |
 | Copy introduction request | Branch-one's individual/combined clipboard actions, templates and appropriate follow-up wording |
 
-## Form and lead detection
+## Company confirmation and round details
 
-The form asks for founder name, company, website, sector, optional HQ country,
-stage, round target, already committed amount, optional lead, investors already
-in and known competitors. Its Cala test defaults are a hypothetical EUR 4 million
-target and EUR 2 million committed; the lead is blank for detection.
+Your round combines the original setup and connections steps. It first asks for
+only the founder company name and lead investor company name. Cala AI and
+Lightspeed are editable test names; no round figures or sector guesses accompany
+them. Search returns separate company and investor options with metadata and
+sources. Both identities require explicit selection and confirmation.
 
-Main's four stages are available: Pre-seed, Seed, Series A and Series B. Amounts
-accept EUR numeric or K/M shorthand and are converted to exact decimal amounts.
-The omitted product, buyer and problem fields stay empty instead of being
-invented. Optional advanced relationship controls preserve follow-up and
-do-not-contact behavior.
+Only after confirmation does the form show company website, sector and HQ country
+from supported Cala fields. Each prefill retains its source references and is
+editable. Broad, explicit industry relationships may fill the sector; the app
+does not infer it from generic entity type or prose. Unknown fields stay empty.
+Founder name, current stage, target and committed amount are not guessed from
+historical funding events. The founder completes these fields, reviews the profile
+and starts the search directly from the same Your round flow.
 
-A blank lead triggers company resolution, then a bounded examination of exact
-funding events. Detection requires an identified issuer and a unique, sourced,
-explicit lead role. It does not choose an arbitrary fuzzy company match or infer
-a lead from a generic investor list. The founder confirms the offered entities.
-Missing or ambiguous evidence produces a refinement message.
+Pre-seed, Seed, Series A and Series B remain available, with an empty initial stage.
+EUR inputs retain exact numeric and K/M shorthand parsing. Advanced exclusions,
+follow-up statuses and preferences remain available after identity confirmation.
+Changing companies clears the old confirmation and factual prefills. Expired
+matches require another lookup. The backend checks canonical company/lead names
+and exact IDs against the confirmed pair before starting a run.
 
-The detected lead is historical context. Its current commitment defaults to
-`unconfirmed`, and introduction requests retain that distinction. Coarse dates
-keep their precision rather than presenting an approximate year as an exact day.
+The legacy full-profile `/api/resolve` endpoint still supports its optional lead
+detection contract for API clients. The browser uses the identity-first endpoints.
+Current-round lead commitment remains `unconfirmed` until the founder changes it.
 
 ## Scoring from main
 
@@ -101,17 +105,23 @@ cents, the rows sum to the open amount and displayed percentages account for the
 whole suggested allocation. Missing tickets and flagged investors do not receive
 invented allocations. No open allocation produces no search or suggested rows.
 
+The top-investors overview shows each suggested amount and percentage within its
+investor row, followed by the Still open remainder and an expandable estimate
+basis. This replaces the separate estimated-allocation card.
+
 ## Conversation and graph
 
-The current main snapshot contains an agent trace and a Current understanding
-summary, not an independent conversational chatbot. The user confirmed that these
-are the requested features. The combined results put Current understanding and
-Agent activity tabs in the upper-left panel using branch-one's visual layout.
-The explanations use the recorded score, flags, counts and open allocation; the
-trace shows actual tool queries, cache use and progress events. Selecting an
-investor synchronizes the explanation context with the graph and shortlist.
-The older local result-conversation API remains compatible for API clients;
-it is not the primary upper-left UI on this branch.
+The lower-left panel provides Chat and Agent activity tabs. Chat sends each
+question and recent conversation history to the configured Codex CLI or
+OpenAI-compatible model API, together with a bounded snapshot of the run. Selecting
+an investor synchronizes the chat context with the graph and shortlist. Generated
+replies explain recorded scores, flags, exact-event connections and allocation,
+and can help draft an introduction without changing the saved result.
+
+Citations and referenced investor IDs are validated against the supplied evidence.
+Unknown fields remain unknown; external tools and new Cala discovery are disabled
+for conversation generation. Model errors remain explicit and retryable. The
+activity tab shows actual search tool queries, cache use and progress events.
 
 The graph continues to use identified funding-event nodes and explicit
 participation/issuer edges. Sector similarity or an inferred allocation does not
@@ -122,7 +132,7 @@ separate and displays its unconfirmed status where applicable.
 
 Backend tests cover original-main golden scoring outputs, typed adapter parity,
 allocation arithmetic, auto-detection/identity safeguards, metadata fallback,
-statuses, graph evidence, copy drafts and local conversation answers. Frontend
+statuses, graph evidence, copy drafts and live conversation provider behavior. Frontend
 checks cover the combined form, confirmation, main scoring flags/percentages,
 graph interaction and clipboard actions, including mobile layout.
 

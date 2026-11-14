@@ -9,6 +9,8 @@ interface ResultsChatProps {
   result: RunResult;
   selectedInvestorId: string | null;
   onSelectInvestor: (id: string | null) => void;
+  embedded?: boolean;
+  active?: boolean;
 }
 
 interface Message {
@@ -39,6 +41,7 @@ function welcome(result: RunResult): Message {
     const lead = result.lead ? ` through ${result.lead.name}` : "";
     content = `Your shortlist contains ${count} lead-connected ${count === 1 ? "investor" : "investors"}${lead}. Ask me why they appear, compare the options, or work through an introduction request.`;
     if (result.profile.round.lead_status === "conditional") content += " Your lead commitment is provisional.";
+    if (result.profile.round.lead_status === "unconfirmed") content += " Your lead commitment is unconfirmed.";
     if (result.state === "partial") content += " Coverage is partial; missing facts stay unknown.";
   }
   return { id: "welcome", role: "assistant", content, citations: [], candidateIds: [], origin: "welcome" };
@@ -80,7 +83,7 @@ function CopyReply({ content }: { content: string }) {
 }
 
 /** A conversation scoped to one immutable run, synchronized with graph selection. */
-export default function ResultsChat({ result, selectedInvestorId, onSelectInvestor }: ResultsChatProps) {
+export default function ResultsChat({ result, selectedInvestorId, onSelectInvestor, embedded = false, active = true }: ResultsChatProps) {
   const [messages, setMessages] = useState<Message[]>(() => [welcome(result)]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -109,9 +112,10 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
   }, [result]);
   useEffect(() => () => { requestVersion.current += 1; controllerRef.current?.abort(); }, []);
   useEffect(() => {
+    if (!active) return;
     const thread = threadRef.current;
     if (thread) thread.scrollTop = thread.scrollHeight;
-  }, [messages, busy, error]);
+  }, [messages, busy, error, active]);
 
   async function send(text: string, investorOverride?: string | null) {
     const question = text.trim();
@@ -157,9 +161,9 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
     }
   }
 
-  return <section className="rc-chat" aria-labelledby={headingId}>
-    <header className="rc-chat-header"><div className="rc-chat-heading"><span className="rc-chat-mark"><MessageCircle size={17} /></span>
-      <div><h2 id={headingId}>Your round assistant</h2><p>Answers grounded in this run&apos;s evidence</p></div></div><span className="rc-chat-scope"><Link2 size={12} />Cala context</span></header>
+  return <section className={`rc-chat${embedded ? " rc-chat-embedded" : ""}`} aria-labelledby={embedded ? undefined : headingId} aria-label={embedded ? "Chat about your round" : undefined}>
+    {!embedded && <header className="rc-chat-header"><div className="rc-chat-heading"><span className="rc-chat-mark"><MessageCircle size={17} /></span>
+      <div><h2 id={headingId}>Your round assistant</h2><p>Answers grounded in this run&apos;s evidence</p></div></div><span className="rc-chat-scope"><Link2 size={12} />Cala context</span></header>}
     {selected && <div className="rc-chat-selection"><span>Discussing <strong>{selected.investor.name}</strong></span>
       <button type="button" onClick={() => onSelectInvestor(null)} aria-label="Clear selected investor"><X size={13} /></button></div>}
     <div className="rc-chat-thread" ref={threadRef} role="log" aria-label="Conversation about your shortlist" aria-live="polite" aria-relevant="additions text" aria-busy={busy}>
@@ -172,10 +176,10 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
             return <button type="button" key={id} aria-pressed={id === selectedInvestorId} onClick={() => onSelectInvestor(id)} title={`Highlight ${card.investor.name} in the knowledge graph`}>{card.investor.name}<ArrowUpRight size={12} /></button>;
           })}</div>}
           <Citations sources={message.citations} />
-          {message.origin && message.origin !== "welcome" && <div className="rc-chat-answer-meta"><span>{message.origin === "model" ? "Model response · grounded in this run" : "From retrieved evidence"}</span><CopyReply content={message.content} /></div>}
+          {message.origin && message.origin !== "welcome" && <div className="rc-chat-answer-meta"><span>{message.origin === "model" ? "Live model response · based on this run" : "From retrieved evidence"}</span><CopyReply content={message.content} /></div>}
         </div>
       </div>)}
-      {busy && <div className="rc-chat-thinking" role="status"><LoaderCircle size={14} className="spinning" /><span>Reviewing the retrieved evidence…</span></div>}
+      {busy && <div className="rc-chat-thinking" role="status"><LoaderCircle size={14} className="spinning" /><span>Generating a reply from your round evidence…</span></div>}
       {error && <div className="rc-chat-error" role="alert"><p>{error}</p>{failedQuestion && <button type="button" disabled={busy} onClick={() => void send(failedQuestion.message, failedQuestion.investorId)}><RotateCcw size={12} />Retry question</button>}</div>}
     </div>
     <div className="rc-chat-suggestions" aria-label="Suggested questions">{SUGGESTIONS.map((suggestion, index) => {

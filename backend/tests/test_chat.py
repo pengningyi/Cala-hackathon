@@ -1,4 +1,4 @@
-"""Snapshot-only chat: no model requests, network calls or result mutations."""
+"""Explicit offline chat compatibility helper; runtime chat has separate live tests."""
 import asyncio
 import time
 from datetime import timedelta
@@ -212,7 +212,7 @@ def test_chat_http_contract_ready_selection_validation_and_no_external_calls(sav
             raise AssertionError("Chat must not request a model assessment")
 
     config = settings(tmp_path).model_copy(update={"model_provider": "codex"})
-    app = create_app(config, provider=NoCallsProvider(), semantic=NoModel())
+    app = create_app(config, provider=NoCallsProvider(), semantic=NoModel(), chat=ResultChat())
     app.state.workflow.runs[saved_result.run_id] = RunRecord(
         id=saved_result.run_id, profile=saved_result.profile, lead=saved_result.lead,
         confirmed_at=saved_result.confirmed_at, started=time.monotonic(), result=saved_result,

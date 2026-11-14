@@ -1,5 +1,7 @@
 import type {
   FounderInput,
+  CompanyMatches,
+  OnboardingConfirmation,
   Health,
   ProgressEvent,
   Resolution,
@@ -70,6 +72,18 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function resolveProfile(profile: FounderInput, lookupStartup = false): Promise<Resolution> {
   const body: ResolveRequest = { profile, lookup_startup: lookupStartup };
   return readJson<Resolution>(await fetchApi("/api/resolve", { method: "POST", body: JSON.stringify(body) }));
+}
+
+export async function findCompanyMatches(companyName: string, leadName: string, signal?: AbortSignal): Promise<CompanyMatches> {
+  return readJson<CompanyMatches>(await fetchApi("/api/onboarding/matches", {
+    method: "POST", body: JSON.stringify({ company_name: companyName, lead_name: leadName }), signal,
+  }));
+}
+
+export async function confirmCompanyMatches(matchId: string, startupId: string, leadId: string, signal?: AbortSignal): Promise<OnboardingConfirmation> {
+  return readJson<OnboardingConfirmation>(await fetchApi(`/api/onboarding/matches/${encodeURIComponent(matchId)}/confirm`, {
+    method: "POST", body: JSON.stringify({ startup_id: startupId, lead_id: leadId }), signal,
+  }));
 }
 
 export async function startRun(resolutionId: string, leadId: string | null, profile: FounderInput): Promise<RunStatus> {

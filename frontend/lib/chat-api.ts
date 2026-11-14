@@ -77,5 +77,8 @@ export async function askRunChat(
       || !payload.candidate_ids.every(id => typeof id === "string")) {
     throw new ApiError("invalid_chat_response", "The assistant response could not be read. Please try again.", response.status);
   }
+  if (!payload.model_used) {
+    throw new ApiError("chat_model_unavailable", "Live model chat is unavailable. Configure Codex CLI or a model API on the server and retry.", response.status);
+  }
   return payload as unknown as RunChatResponse;
 }

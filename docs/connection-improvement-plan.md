@@ -2,10 +2,42 @@
 
 **Date:** 14 November 2026
 
-**Status:** Proposed implementation plan; the changes below are not yet implemented.
+**Status:** Reviewed against the local `branch-basic` implementation on 14 November 2026. Core Phase 1 discovery changes and Phase 2 network expansion remain unimplemented; existing safeguards are listed below.
 
 **Basis:** [MVP PRD](../Co-Investor%20Finder%20%E2%80%94%20MVP%20PRD.md) and
 [live Cala API audit](cala-connection-audit.md).
+
+## Implementation review: 14 November 2026
+
+The company-matching, metadata, allocation and live-chat changes do not implement
+the proposed connection-discovery strategies. The current main shortlist still
+comes from a bounded sample of shared funding events.
+
+| Strategy or safeguard | Current status | Evidence |
+| --- | --- | --- |
+| Paginated funding discovery | Missing | Native projections request `limit: 20` per relationship without an `offset` or paging loop; see [native projection](../backend/app/cala_native.py#L338). |
+| Seed, Series A and unknown discovery tiers | Missing | [Lead graph discovery](../backend/app/cala_native.py#L257) accepts lead ID/lookback, sorts the sampled events by available date/ID, and expands up to three events. Stage matching happens after expansion, not before event retrieval. |
+| Per-event selection reasons and new discovery tests | Missing | No second-page-only event, repeated-page stop, stage-tier or selection-reason test is present. Existing graph/budget tests cover the current sampling policy. |
+| Funding and corporate-event relationships | Existing baseline | Both relationship types and event-ID deduplication within the retrieved sample are implemented in [native discovery](../backend/app/cala_native.py#L261). |
+| Exact event joins, dated evidence, conflicts and exclusions | Existing baseline | [Scoring safeguards](../backend/app/scoring.py#L165) and [workflow qualification](../backend/app/pipeline.py#L465) reject unsupported joins, conflicting events and unusable dates. |
+| Call/time limits, caching and partial results | Existing baseline | [Runtime budgets](../backend/app/runtime.py#L81) retain the 20-call/four-concurrent/90-second limits and assembly reserve. Native discovery explicitly reports partial coverage. |
+| Founder, previous-company, board and fund paths | Missing | There is no broader path model, relationship traversal or Explore founder network API/action. The existing founder node represents the startup and its founder-selected lead route, not a retrieved person/board network. |
+| Separate network budget, progress and per-hop role dates | Missing | [GraphSnapshot](../backend/app/models.py#L265) contains funding rounds only; there is no independent founder-network result. |
+| Shared selection, evidence chat and founder-supplied route | Existing baseline | Shortlist, graph and live chat share selection. Chat explains the saved result and does not discover missing paths. The dashed route is attributed to the founder. |
+| Introduction-access status | Partial baseline | Current commitment/provisional labels and cautionary wording exist, but there is no independent typed access status or dated founder access report. |
+
+The Exa second-page discovery and Cala ? founder ? Vilynx ? board ? fund examples
+remain proposals. Phase 1 is not ready for its acceptance gate, and Phase 2 has
+not started. The next implementation priority is paginated, stage-aware discovery;
+founder/board exploration remains a separate later scope.
+
+Later user requests also qualify two older acceptance criteria: the identity-first
+browser performs company lookups before round amounts are entered, so a filled
+round guarantees zero **funding-discovery** calls rather than zero company-lookup
+calls. Manual startup profiles remain available through the legacy full-profile
+API; the current browser requires confirming both company identities. Scoring
+uses the explicitly selected main-branch rules and version, including zero for
+unknown inputs; the numerical weights remain 35/20/15/15/10/5.
 
 ## 1. Intended outcome
 
@@ -202,7 +234,7 @@ past backing alone never sets current-round commitment.
 
 ## 6. Evidence, fit and presentation
 
-Preserve the requested results layout: conversation above the shortlist on the
+Preserve the requested results layout: the shortlist above the insights panel on the
 left, with the knowledge graph on the right. Add the new information within those
 panels and the existing details view.
 

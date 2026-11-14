@@ -9,9 +9,11 @@ from urllib.parse import urlsplit
 
 from .config import Settings
 from .models import (
+    CompanyConfirmation, CompanyMatches, CompanyMatchRequest, ConfirmCompanyMatches,
     DetectedLead, Entity, FounderInput, FundingRound, GraphSnapshot, InvestorProfile, Resolution,
     ResolveRequest, RunResult, RunStatus, StartRunRequest,
 )
+from .onboarding import startup_prefill
 from .runtime import BudgetExceeded, ResponseCache, Retrieval, Trace, utcnow
 from .scoring import (
     build_allocation, combined_draft, deduplicate_rounds, exclusion_for, months_before, normalize_stage, normalized_name,
@@ -41,6 +43,12 @@ class RunRecord:
                          result_url=f"/api/runs/{self.id}/result", events_url=f"/api/runs/{self.id}/events")
 
 
+@dataclass
+class OnboardingRecord:
+    matches: CompanyMatches
+    confirmation: CompanyConfirmation | None = None
+
+
 class Workflow:
     def __init__(self, settings: Settings, provider, semantic=None):
         self.settings, self.provider, self.semantic = settings, provider, semantic
@@ -56,17 +64,22 @@ class Workflow:
         self.cache = ResponseCache(settings.cache_dir, settings.cache_ttl_seconds, namespace)
         self.semaphore = asyncio.Semaphore(settings.cala_concurrency)
         self.resolutions: dict[str, Resolution] = {}
+        self.onboarding_matches: dict[str, OnboardingRecord] = {}
+        self.onboarding_confirmations: dict[str, OnboardingRecord] = {}
+        self._pending_identity_lookups = 0
         self.runs: dict[str, RunRecord] = {}
 
     def cleanup(self):
         now = utcnow()
         self.resolutions = {k: v for k, v in self.resolutions.items() if v.expires_at > now}
+        self.onboarding_matches = {k: v for k, v in self.onboarding_matches.items() if v.matches.expires_at > now}
+        self.onboarding_confirmations = {k: v for k, v in self.onboarding_confirmations.items() if v.matches.expires_at > now}
         self.runs = {k: v for k, v in self.runs.items()
                      if v.result is None or (now - v.result.finished_at).total_seconds() < self.settings.retention_seconds}
 
     async def resolve(self, request: ResolveRequest):
         self.cleanup()
-        if len(self.resolutions) >= self.settings.max_stored_runs:
+        if len(self.resolutions) + len(self.onboarding_matches) + self._pending_identity_lookups >= self.settings.max_stored_runs:
             raise WorkflowError("capacity", "Resolution capacity reached; retry after older resolutions expire", 429)
         started, now = time.monotonic(), utcnow()
         leads, startups, notices = [], [], []
@@ -117,6 +130,88 @@ class Workflow:
                                 no_open_allocation=request.profile.round.remaining_eur == 0, notices=notices)
         self.resolutions[resolution.id] = resolution
         return resolution
+
+    async def match_companies(self, request: CompanyMatchRequest):
+        """Resolve only two names; current round facts do not exist yet."""
+        self.cleanup()
+        if len(self.resolutions) + len(self.onboarding_matches) + self._pending_identity_lookups >= self.settings.max_stored_runs:
+            raise WorkflowError("capacity", "Company lookup capacity reached; retry after older matches expire", 429)
+        self._pending_identity_lookups += 1
+        try:
+            started, now = time.monotonic(), utcnow()
+            notices = []
+            retrieval = Retrieval(self.provider, self.cache, self.settings, Trace(), semaphore=self.semaphore)
+            retrieval.stop_at = started + self.settings.cala_request_timeout_seconds
+            outcomes = await asyncio.gather(
+                retrieval.call("search_entities", {"query": request.company_name, "kind": "company"}, list[Entity], "resolver_company"),
+                retrieval.call("search_entities", {"query": request.lead_name, "kind": "investor"}, list[Entity], "resolver_lead"),
+                return_exceptions=True,
+            )
+            for outcome in outcomes:
+                if isinstance(outcome, asyncio.CancelledError):
+                    raise outcome
+            failures = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+            if len(failures) == len(outcomes):
+                raise failures[0]
+            startups, leads = [], []
+            for index, label in ((0, "company"), (1, "lead investor")):
+                outcome = outcomes[index]
+                if isinstance(outcome, Exception):
+                    notices.append(f"The {label} lookup could not finish. Retry or refine its name.")
+                    continue
+                # Bound optional enrichment even for a custom provider returning an oversized page.
+                matches, seen = [], set()
+                for entity in outcome:
+                    if entity.id not in seen:
+                        seen.add(entity.id)
+                        matches.append(entity)
+                if len(matches) > 10:
+                    notices.append(f"Only the first ten {label} matches are shown; refine the name if needed.")
+                if index == 0:
+                    startups = matches[:10]
+                else:
+                    leads = matches[:10]
+            if callable(getattr(self.provider, "entity_metadata", None)) and (leads or startups):
+                leads, startups = await self._resolve_metadata(retrieval, leads, startups, notices)
+            if not startups:
+                notices.append("No company match is available. Refine the founder company name before continuing.")
+            if not leads:
+                notices.append("No lead investor match is available. Refine the lead company name before continuing.")
+            matches = CompanyMatches(id=uuid.uuid4().hex, startup_matches=startups, lead_matches=leads,
+                                     resolver_ms=round((time.monotonic() - started) * 1000, 2),
+                                     created_at=now, expires_at=now + timedelta(seconds=self.settings.retention_seconds),
+                                     notices=notices)
+            self.onboarding_matches[matches.id] = OnboardingRecord(matches=matches.model_copy(deep=True))
+            return matches
+        finally:
+            self._pending_identity_lookups -= 1
+
+    def confirm_companies(self, match_id: str, request: ConfirmCompanyMatches):
+        """Confirm offered IDs and return editable sourced fields without any retrieval."""
+        self.cleanup()
+        record = self.onboarding_matches.get(match_id)
+        if record is None:
+            raise WorkflowError("matches_not_found", "Company matches are missing or expired; search again", 404)
+        startup = next((item for item in record.matches.startup_matches if item.id == request.startup_id), None)
+        lead = next((item for item in record.matches.lead_matches if item.id == request.lead_id), None)
+        if startup is None:
+            raise WorkflowError("invalid_startup_selection", "Select a company offered by this lookup")
+        if lead is None:
+            raise WorkflowError("invalid_lead_selection", "Select a lead investor offered by this lookup")
+        if (record.confirmation and record.confirmation.startup.id == startup.id
+                and record.confirmation.lead.id == lead.id):
+            return record.confirmation.model_copy(deep=True)
+        if record.confirmation:
+            self.onboarding_confirmations.pop(record.confirmation.resolution_id, None)
+        prefill, sources = startup_prefill(startup)
+        confirmation = CompanyConfirmation(
+            resolution_id=uuid.uuid4().hex, startup=startup.model_copy(deep=True), lead=lead.model_copy(deep=True),
+            prefill=prefill, prefill_sources=sources, expires_at=record.matches.expires_at,
+            notices=["Review the confirmed company details. Missing fields and current-round information need your input."],
+        )
+        record.confirmation = confirmation
+        self.onboarding_confirmations[confirmation.resolution_id] = record
+        return confirmation.model_copy(deep=True)
 
     async def _resolve_metadata(self, retrieval: Retrieval, leads: list[Entity],
                                 startups: list[Entity], notices: list[str]):
@@ -180,17 +275,27 @@ class Workflow:
 
     def start(self, request: StartRunRequest):
         self.cleanup()
+        identity = self.onboarding_confirmations.get(request.resolution_id)
         resolution = self.resolutions.get(request.resolution_id)
-        if resolution is None:
+        if identity is not None:
+            confirmed = identity.confirmation
+            if (request.profile.startup.cala_entity_id != confirmed.startup.id
+                    or request.profile.startup.company_name != confirmed.startup.name):
+                raise WorkflowError("confirmed_startup_changed", "The company changed. Confirm the correct company match again")
+            if request.lead_id != confirmed.lead.id or request.profile.lead_name != confirmed.lead.name:
+                raise WorkflowError("confirmed_lead_changed", "The lead investor changed. Confirm the correct lead match again")
+            lead = confirmed.lead
+        elif resolution is None:
             raise WorkflowError("resolution_not_found", "Resolution missing or expired; resolve again", 404)
-        if request.profile.lead_name != resolution.profile.lead_name:
+        elif request.profile.lead_name != resolution.profile.lead_name:
             raise WorkflowError("lead_changed", "Resolve the updated lead name before confirmation")
-        if request.profile.startup.cala_entity_id and request.profile.startup.cala_entity_id not in {e.id for e in resolution.startup_matches}:
+        if identity is None and request.profile.startup.cala_entity_id and request.profile.startup.cala_entity_id not in {e.id for e in resolution.startup_matches}:
             raise WorkflowError("invalid_startup_selection", "Select a startup ID offered by this resolution or use a manual profile")
-        if (resolution.detected_lead and request.profile.startup.cala_entity_id
+        if (identity is None and resolution.detected_lead and request.profile.startup.cala_entity_id
                 and request.profile.startup.cala_entity_id != resolution.detected_lead.company_id):
             raise WorkflowError("detected_lead_company_changed", "This suggested lead belongs to a different company match. Resolve the corrected company or enter its lead manually.")
-        lead = next((x for x in resolution.lead_matches if x.id == request.lead_id), None)
+        if identity is None:
+            lead = next((x for x in resolution.lead_matches if x.id == request.lead_id), None)
         if request.profile.round.remaining_eur > 0 and lead is None:
             raise WorkflowError("invalid_lead_selection", "Select a lead ID offered by this resolution")
         if sum(x.result is None for x in self.runs.values()) >= self.settings.max_active_runs:

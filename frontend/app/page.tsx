@@ -6,25 +6,25 @@ import {
   CircleHelp, Clock3, Copy, ExternalLink, FileCheck2, GitBranch, Layers3,
   Link2, LoaderCircle, Network, Plus, Radio, RotateCcw, ShieldCheck, Sparkles, X,
 } from "lucide-react";
-import { ApiError, getHealth, getRunResult, resolveProfile, startRun, subscribeRunEvents } from "../lib/api";
-import type { CandidateCard, Entity, FounderInput, InvestorStatus, ProgressEvent, Resolution, RunResult, RunStatus, Source } from "../lib/types";
+import { ApiError, confirmCompanyMatches, findCompanyMatches, getHealth, getRunResult, startRun, subscribeRunEvents } from "../lib/api";
+import type { CandidateCard, CompanyMatches, Entity, FounderInput, InvestorStatus, OnboardingConfirmation, ProgressEvent, RunResult, RunStatus, Source } from "../lib/types";
 import ResultsWorkspace from "../components/results-workspace";
 import EntityMetadata, { EntityIdentity } from "../components/entity-metadata";
 
-type Phase = "profile" | "confirm" | "running" | "results";
+type Phase = "identify" | "matches" | "details" | "running" | "results";
 type StatusRow = { investor_name: string; investor_id?: string; status: InvestorStatus };
 type FormData = {
   founder_name: string; company_name: string; website: string; sector: string; country: string;
-  known_competitors: string; stage: "pre_seed" | "seed" | "series_a" | "series_b"; target_eur: string;
+  known_competitors: string; stage: "" | "pre_seed" | "seed" | "series_a" | "series_b"; target_eur: string;
   firm_commitments_eur: string; lead_name: string; excluded_investors: string;
   lead_status: "signed" | "firm_verbal" | "conditional" | "unconfirmed";
   include_angels: boolean; include_corporate_vcs: boolean; investor_countries: string;
   statuses: StatusRow[];
 };
 const INITIAL: FormData = {
-  founder_name: "", company_name: "Cala AI", website: "cala.ai",
-  sector: "AI infrastructure, data infrastructure, AI agents", country: "", known_competitors: "", stage: "seed",
-  target_eur: "4000000", firm_commitments_eur: "2000000", lead_name: "", excluded_investors: "",
+  founder_name: "", company_name: "Cala AI", website: "",
+  sector: "", country: "", known_competitors: "", stage: "",
+  target_eur: "", firm_commitments_eur: "", lead_name: "Lightspeed Venture Partners", excluded_investors: "",
   lead_status: "unconfirmed", include_angels: true,
   include_corporate_vcs: true, investor_countries: "", statuses: [],
 };
@@ -78,6 +78,7 @@ function companyWebsite(value: string): string | null {
 }
 
 function makeProfile(form: FormData): FounderInput {
+  if (!form.stage) throw new Error("Choose the stage of your current round.");
   return {
     founder_name: form.founder_name || null,
     startup: { company_name: form.company_name, website: companyWebsite(form.website),
@@ -203,12 +204,12 @@ function Candidate({ card, index, onExclude, busy, initiallyExpanded = false, sc
 
 export default function Home() {
   const [form, setForm] = useState<FormData>(INITIAL);
-  const [phase, setPhase] = useState<Phase>("profile");
-  const [lookupStartup, setLookupStartup] = useState(true);
-  const [resolution, setResolution] = useState<Resolution | null>(null);
+  const [phase, setPhase] = useState<Phase>("identify");
+  const [matches, setMatches] = useState<CompanyMatches | null>(null);
+  const [identity, setIdentity] = useState<OnboardingConfirmation | null>(null);
   const [selectedLead, setSelectedLead] = useState<string | null>(null);
   const [selectedStartup, setSelectedStartup] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [profileReviewed, setProfileReviewed] = useState(false);
   const [run, setRun] = useState<RunStatus | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
@@ -219,6 +220,9 @@ export default function Home() {
   const [streamNotice, setStreamNotice] = useState(false);
   const [recoveryAvailable, setRecoveryAvailable] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+  const lookupController = useRef<AbortController | null>(null);
+  const lookupVersion = useRef(0);
+  useEffect(() => () => { lookupVersion.current += 1; lookupController.current?.abort(); }, []);
 
   useEffect(() => { getHealth().then(health => setConnected(health.cala_configured)).catch(() => setConnected(false)); }, []);
   useEffect(() => { if (phase !== "running" || !run) return;
@@ -248,27 +252,74 @@ export default function Home() {
     return () => { disposed = true; clearInterval(timer); unsubscribe(); };
   }, [run?.id]);
 
-  function update<K extends keyof FormData>(key: K, value: FormData[K]) { setForm(previous => ({ ...previous, [key]: value })); }
+  function update<K extends keyof FormData>(key: K, value: FormData[K]) {
+    setForm(previous => ({ ...previous, [key]: value }));
+    setProfileReviewed(false);
+  }
   function scrollTop() { requestAnimationFrame(() => mainRef.current?.scrollIntoView({ block: "start", behavior: "instant" })); }
-  async function resolve(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError(null);
+  function changeCompanies() {
+    lookupVersion.current += 1; lookupController.current?.abort(); lookupController.current = null;
+    setForm(previous => ({ ...INITIAL, company_name: previous.company_name, lead_name: previous.lead_name }));
+    setMatches(null); setIdentity(null); setSelectedLead(null); setSelectedStartup(null);
+    setProfileReviewed(false); setRun(null); setResult(null); setEvents([]);
+    setError(null); setBusy(false); setPhase("identify"); scrollTop();
+  }
+  async function findCompanies(event: FormEvent) {
+    event.preventDefault();
+    if (busy || !form.company_name.trim() || !form.lead_name.trim()) return;
+    lookupController.current?.abort();
+    const controller = new AbortController(); lookupController.current = controller;
+    const version = ++lookupVersion.current;
+    setBusy(true); setError(null); setIdentity(null); setProfileReviewed(false);
     try {
-      const resolved = await resolveProfile(makeProfile(form), lookupStartup);
-      setResolution(resolved); setSelectedLead(null); setSelectedStartup(null); setConfirmed(false);
-      setPhase("confirm"); scrollTop();
-    } catch (err) { setError(errorMessage(err)); }
-    finally { setBusy(false); }
+      const found = await findCompanyMatches(form.company_name.trim(), form.lead_name.trim(), controller.signal);
+      if (controller.signal.aborted || version !== lookupVersion.current) return;
+      setMatches(found); setSelectedLead(null); setSelectedStartup(null);
+      setPhase("matches"); scrollTop();
+    } catch (err) {
+      if (!controller.signal.aborted && version === lookupVersion.current) setError(errorMessage(err));
+    } finally {
+      if (version === lookupVersion.current) { setBusy(false); lookupController.current = null; }
+    }
+  }
+  async function confirmCompanies() {
+    if (!matches || !selectedLead || !selectedStartup || busy) return;
+    const controller = new AbortController(); lookupController.current = controller;
+    const version = ++lookupVersion.current;
+    setBusy(true); setError(null);
+    try {
+      const accepted = await confirmCompanyMatches(matches.id, selectedStartup, selectedLead, controller.signal);
+      if (controller.signal.aborted || version !== lookupVersion.current) return;
+      setIdentity(accepted);
+      setForm({ ...INITIAL, company_name: accepted.startup.name, lead_name: accepted.lead.name,
+        website: accepted.prefill.website || "", sector: accepted.prefill.sector || "", country: accepted.prefill.country || "" });
+      setProfileReviewed(false); setPhase("details"); scrollTop();
+    } catch (err) {
+      if (!controller.signal.aborted && version === lookupVersion.current) {
+        if (err instanceof ApiError && err.status === 404) { changeCompanies(); setError("Your company matches expired. Find matching companies again."); }
+        else setError(errorMessage(err));
+      }
+    } finally {
+      if (version === lookupVersion.current) { setBusy(false); lookupController.current = null; }
+    }
   }
   async function beginRun(profile?: FounderInput) {
-    if (!resolution) return;
+    if (!identity || busy) return;
     setBusy(true); setError(null);
-    const original = profile || resolution.profile;
-    const snapshot: FounderInput = { ...original, startup: { ...original.startup, cala_entity_id: selectedStartup } };
     try {
-      const started = await startRun(resolution.id, selectedLead, snapshot);
+      const original = profile || makeProfile(form);
+      const snapshot: FounderInput = { ...original, lead_name: identity.lead.name,
+        startup: { ...original.startup, company_name: identity.startup.name, cala_entity_id: identity.startup.id } };
+      const started = await startRun(identity.resolution_id, identity.lead.id, snapshot);
       setEvents([]); setResult(null); setStreamNotice(false); setRecoveryAvailable(false); setRun(started); setPhase("running"); scrollTop();
-    } catch (err) { setError(errorMessage(err)); }
-    finally { setBusy(false); }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) { changeCompanies(); setError("Your confirmed companies expired. Match and confirm them again before searching."); }
+      else setError(errorMessage(err));
+    } finally { setBusy(false); }
+  }
+  function completeRound(event: FormEvent) {
+    event.preventDefault();
+    if (profileReviewed) void beginRun();
   }
   async function exclude(card: CandidateCard) {
     if (!result) return;
@@ -277,44 +328,71 @@ export default function Home() {
     setForm(previous => ({ ...previous, statuses: [...previous.statuses, { investor_id: card.investor.id, investor_name: card.investor.name, status: "do_not_contact" }] }));
     await beginRun(snapshot);
   }
-  function editProfile() { setPhase("profile"); setError(null); scrollTop(); }
+  function editProfile() { setPhase(identity ? "details" : matches ? "matches" : "identify"); setError(null); scrollTop(); }
   let previewGap: number | null = null;
   try { previewGap = Math.max(0, Number(euroAmount(form.target_eur, "Round target", true)) - Number(euroAmount(form.firm_commitments_eur, "Already committed"))); } catch { /* Show the preview after both amounts are valid. */ }
   const latestStep = events.at(-1)?.step;
   const activeStep = latestStep === "profiles" ? 1 : latestStep === "assessments" || latestStep === "scoring" ? 2 : latestStep === "complete" ? 3 : 0;
-  const detectedCompanyMismatch = Boolean(selectedStartup && resolution?.detected_lead?.company_id
-    && selectedStartup !== resolution.detected_lead.company_id);
+
 
   return <div className="app-shell"><header className="topbar"><a className="brand" href="/" aria-label="RoundCloser home"><span className="brand-mark"><GitBranch size={20} strokeWidth={1.7} /></span>roundcloser<span className="brand-beta">BETA</span></a>
-    <nav className="pill-nav" aria-label="Workflow"><button className={phase === "profile" ? "active" : ""} onClick={editProfile} disabled={phase === "running"}><Building2 size={14} /><span>Your round</span></button>
-      <button className={phase === "confirm" || phase === "running" ? "active" : ""} onClick={() => resolution && phase !== "running" && setPhase("confirm")} disabled={!resolution || phase === "running"}><Network size={14} /><span>Connections</span></button>
+    <nav className="pill-nav" aria-label="Workflow"><button className={phase !== "results" ? "active" : ""} onClick={editProfile} disabled={phase === "running"}><Building2 size={14} /><span>Your round</span></button>
       <button className={phase === "results" ? "active" : ""} onClick={() => result && setPhase("results")} disabled={!result || phase === "running"}><Layers3 size={14} /><span>Your shortlist</span></button></nav>
     <div className="connection-badge"><span className={connected ? "connection-dot connected" : "connection-dot"} />{connected == null ? "Connecting to Cala" : connected ? "Powered by Cala" : "Cala not connected"}</div></header>
     <main className={`main-panel ${phase === "results" ? "main-panel-results" : ""}`} ref={mainRef}><div className={`content-width ${phase === "results" ? "results-content" : ""}`}>
-      <div className="page-topline"><span className="eyebrow"><span className="small-dot" />A clearer path to your next introduction</span><span className="page-count mono">{phase === "profile" ? "01 / 03" : phase === "results" ? "03 / 03" : "02 / 03"}</span></div>
-      {phase === "profile" && <><div className="hero"><div><h1>Build your round.<br /><span>Find who comes next.</span></h1><p>Enter your company and round, confirm the Cala matches,<br className="desktop-break" /> and turn the lead's network into an introduction request.</p></div><div className="hero-note"><ShieldCheck size={17} /><span>Cala facts.<br /><strong>Your decision.</strong></span></div></div>
-        <div className="inline-note" role="note"><CircleHelp size={15} /><p><strong>Cala testing profile.</strong> The prefilled seed round and amounts are hypothetical. Leave the lead blank to look for a historical lead in Cala, then confirm the right investor.</p></div>
-        <div className="workspace-grid"><form className="profile-form" onSubmit={resolve}>
-          <section className="form-section"><div className="section-heading"><span className="section-number mono">01</span><div><h2>Your company</h2><p>Start with your company and sector.</p></div></div>
-            <div className="form-grid"><Field title="Founder name" optional><input maxLength={200} value={form.founder_name} onChange={event => update("founder_name", event.target.value)} autoComplete="name" /></Field>
-              <Field title="Company name"><input required maxLength={200} value={form.company_name} onChange={event => update("company_name", event.target.value)} placeholder="Your company" autoComplete="organization" /></Field>
-              <Field title="Company website" optional hint="A domain such as cala.ai is enough."><input value={form.website} onChange={event => update("website", event.target.value)} placeholder="cala.ai" autoComplete="url" /></Field>
-              <Field title="Sector" hint="Comma-separated terms, such as AI infrastructure, data."><input required maxLength={200} value={form.sector} onChange={event => update("sector", event.target.value)} placeholder="AI infrastructure, data" /></Field>
+      <div className="page-topline"><span className="eyebrow"><span className="small-dot" />A clearer path to your next introduction</span><span className="page-count mono">{phase === "results" ? "02 / 02" : "01 / 02"}</span></div>
+      {phase !== "running" && phase !== "results" && <ol className="onboarding-progress" aria-label="Round setup progress">{["Find companies", "Confirm matches", "Complete your round"].map((step, index) => {
+        const current = phase === "identify" ? 0 : phase === "matches" ? 1 : 2;
+        return <li key={step} className={index === current ? "is-current" : index < current ? "is-complete" : ""} aria-current={index === current ? "step" : undefined}><span>{index < current ? <Check size={12} /> : index + 1}</span>{step}</li>;
+      })}</ol>}
+
+      {phase === "identify" && <><div className="hero"><div><h1>Start with your company.<br /><span>Find the right lead.</span></h1><p>Tell us the two company names. Confirm the Cala matches,<br className="desktop-break" /> then complete the details that public data cannot tell us.</p></div><div className="hero-note"><ShieldCheck size={17} /><span>Cala facts.<br /><strong>Your decision.</strong></span></div></div>
+        <div className="workspace-grid"><form className="profile-form identity-search-form" onSubmit={findCompanies}>
+          <section className="form-section"><div className="section-heading"><span className="section-number mono">01</span><div><h2>Find your companies</h2><p>We will show potential matches for you to choose from.</p></div></div>
+            <div className="form-grid"><Field title="Company name" className="span-two"><input required disabled={busy} maxLength={200} value={form.company_name} onChange={event => update("company_name", event.target.value)} placeholder="Your company" autoComplete="organization" /></Field>
+              <Field title="Lead investor company name" className="span-two"><input required disabled={busy} maxLength={200} value={form.lead_name} onChange={event => update("lead_name", event.target.value)} placeholder="Your lead investor's company" /></Field></div>
+          </section>
+          {error && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>{error}</span></div>}
+          <div className="form-footer"><span><ShieldCheck size={14} />You confirm both company identities.</span><button className="button primary large" disabled={busy || !form.company_name.trim() || !form.lead_name.trim()} type="submit">{busy ? <LoaderCircle size={16} className="spinning" /> : <Network size={16} />}{busy ? "Finding companies..." : "Find matching companies"}<ArrowRight size={16} /></button></div>
+        </form><aside className="guidance-sidebar"><div className="guidance-card"><span className="eyebrow">A connection, with context</span><NetworkGraphic /><h3>The right companies.<br />A clearer starting point.</h3><p>Confirm your company and lead first. We then prefill known details and leave missing information for you to complete.</p><div className="guidance-divider" /><ul className="benefit-list"><li><Building2 size={16} /><span>Choose the correct Cala entities</span></li><li><FileCheck2 size={16} /><span>Review supported company details</span></li><li><Copy size={16} /><span>Find a useful next introduction</span></li></ul></div></aside></div></>}
+
+      {phase === "matches" && matches && <><button className="back-link" onClick={changeCompanies} disabled={busy}><ArrowLeft size={14} />Edit company names</button><div className="hero compact"><div><h1>Let's match the names.<br /><span>You choose the companies.</span></h1><p>Select your company and lead investor. We will use these identities to prefill your round form.</p></div></div>
+        <div className="workspace-grid"><div className="confirmation-main">
+          <section className="confirmation-section startup-matches"><div className="section-heading"><span className="section-number mono">01</span><div><h2>Choose your company</h2><p>Cala matches for &ldquo;{form.company_name}&rdquo;</p></div></div>
+            <div className="entity-options">{matches.startup_matches.map(entity => <EntityOption key={entity.id} entity={entity} selected={selectedStartup === entity.id} disabled={busy} onSelect={() => { setSelectedStartup(entity.id); }} />)}</div>
+            {!matches.startup_matches.length && <div className="empty-inline"><Building2 size={24} /><h3>No company match found</h3><p>Try your company's full name or another spelling.</p><button type="button" className="button secondary" onClick={changeCompanies}><ArrowLeft size={14} />Refine company names</button></div>}
+          </section>
+          <section className="confirmation-section lead-matches"><div className="section-heading"><span className="section-number mono">02</span><div><h2>Choose your lead</h2><p>Cala matches for &ldquo;{form.lead_name}&rdquo;</p></div></div>
+            <div className="entity-options">{matches.lead_matches.map(entity => <EntityOption key={entity.id} entity={entity} selected={selectedLead === entity.id} disabled={busy} onSelect={() => { setSelectedLead(entity.id); }} />)}</div>
+            {!matches.lead_matches.length && <div className="empty-inline"><Network size={24} /><h3>No lead match found</h3><p>Try the investor's full organization name or another spelling.</p><button type="button" className="button secondary" onClick={changeCompanies}><ArrowLeft size={14} />Refine company names</button></div>}
+          </section>
+          <small className="resolver-time mono">COMPANY LOOKUP &middot; {(matches.resolver_ms / 1000).toFixed(1)}s</small>
+          {matches.notices.map((notice, index) => <div className="inline-note" key={index}><CircleHelp size={15} /><p>{notice}</p></div>)}
+          {error && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>{error}</span></div>}
+          <div className="form-footer"><span><FileCheck2 size={14} />Next, review the prefilled details.</span><button type="button" className="button primary large" disabled={busy || !selectedStartup || !selectedLead} onClick={() => void confirmCompanies()}>{busy ? <LoaderCircle size={16} className="spinning" /> : <Check size={16} />}{busy ? "Confirming companies..." : "Confirm companies"}<ArrowRight size={16} /></button></div>
+        </div><aside className="guidance-sidebar"><div className="guidance-card"><span className="eyebrow">Before the round details</span><NetworkGraphic /><h3>Check the identity.<br />Then add your context.</h3><p>Use the website, headquarters, description and source links to distinguish companies with similar names.</p><div className="guidance-divider" /><p>Confirming these companies does not start an investor search or assume a lead commitment.</p></div></aside></div></>}
+
+      {phase === "details" && identity && <><button className="back-link" onClick={changeCompanies} disabled={busy}><ArrowLeft size={14} />Change companies</button><div className="hero compact"><div><h1>Your companies, confirmed.<br /><span>Complete your round.</span></h1><p>Known company details are prefilled. Review them and fill the gaps before we search.</p></div></div>
+        <div className="confirmed-companies" aria-label="Confirmed companies"><div><span>Your company</span><strong>{identity.startup.name}</strong></div><div><span>Your lead investor</span><strong>{identity.lead.name}</strong></div><span className="confirmed-companies-badge"><Check size={13} />Identities confirmed</span></div>
+        <div className="workspace-grid"><form className="profile-form round-details-form" onSubmit={completeRound}>
+          <section className="form-section"><div className="section-heading"><span className="section-number mono">01</span><div><h2>Your company details</h2><p>Review Cala's available details and add anything missing.</p></div></div>
+            <div className="form-grid"><Field title="Company name"><input readOnly value={form.company_name} /></Field>
+              <Field title="Founder name" optional><input maxLength={200} value={form.founder_name} onChange={event => update("founder_name", event.target.value)} autoComplete="name" /></Field>
+              <Field title="Company website" optional hint="A domain such as cala.ai is enough."><input value={form.website} onChange={event => update("website", event.target.value)} placeholder="Company website, if known" autoComplete="url" /></Field>
+              <Field title="Sector" hint="Review the prefill or enter your current sector."><input required maxLength={200} value={form.sector} onChange={event => update("sector", event.target.value)} placeholder="Your sector" /></Field>
               <Field title="Headquarters country" optional><input maxLength={100} value={form.country} onChange={event => update("country", event.target.value)} placeholder="Country, if known" autoComplete="country-name" /></Field>
-              <Field title="Round stage"><select required value={form.stage} onChange={event => update("stage", event.target.value as FormData["stage"])}><option value="pre_seed">Pre-seed</option><option value="seed">Seed</option><option value="series_a">Series A</option><option value="series_b">Series B</option></select></Field></div>
-            <label className="check-row lookup-check"><input type="checkbox" checked={lookupStartup} onChange={event => setLookupStartup(event.target.checked)} /><span>Also look up my company in Cala<small>A company match can help find your lead. You confirm every match.</small></span></label>
+              <Field title="Confirmed lead investor"><input readOnly value={form.lead_name} /></Field></div>
+            {Object.values(identity.prefill_sources).some(sources => sources.length > 0) && <details className="prefill-evidence"><summary><Link2 size={13} />Company prefill sources<ChevronDown size={13} /></summary><div>{Object.entries(identity.prefill_sources).filter(([, sources]) => sources.length > 0).map(([field, sources]) => <div key={field}><strong>{field === "country" ? "Headquarters country" : field === "company_name" ? "Company name" : label(field)}</strong><Sources sources={sources} title="prefill sources" /></div>)}</div></details>}
           </section>
-          <section className="form-section"><div className="section-heading"><span className="section-number mono">02</span><div><h2>The round</h2><p>How much are you raising, and how much is already committed?</p></div></div>
-            <div className="form-grid"><Field title="Round target (EUR)" hint="Numbers, K or M; for example 4M."><input required inputMode="decimal" value={form.target_eur} onChange={event => update("target_eur", event.target.value)} placeholder="4M" /></Field>
-              <Field title="Already committed (EUR)" hint="Firm commitments, excluding conditional interest."><input required inputMode="decimal" value={form.firm_commitments_eur} onChange={event => update("firm_commitments_eur", event.target.value)} placeholder="2M" /></Field></div>
-          </section>
-          <section className="form-section"><div className="section-heading"><span className="section-number mono">03</span><div><h2>Your lead & existing investors</h2><p>Use your lead's name, or let Cala suggest one for you to confirm.</p></div></div>
-            <div className="form-grid"><Field title="Lead investor name" optional className="span-two" hint="Leave blank to look for a lead in your company's funding history."><input maxLength={200} value={form.lead_name} onChange={event => update("lead_name", event.target.value)} placeholder="Leave blank to auto-detect via Cala" /></Field>
+          <section className="form-section"><div className="section-heading"><span className="section-number mono">02</span><div><h2>Your current round</h2><p>Historical funding does not establish this round's stage, target or commitments.</p></div></div>
+            <div className="form-grid"><Field title="Round stage"><select required value={form.stage} onChange={event => update("stage", event.target.value as FormData["stage"])}><option value="">Choose your round stage</option><option value="pre_seed">Pre-seed</option><option value="seed">Seed</option><option value="series_a">Series A</option><option value="series_b">Series B</option></select></Field>
+              <Field title="Lead commitment status"><select value={form.lead_status} onChange={event => update("lead_status", event.target.value as FormData["lead_status"])}><option value="unconfirmed">Current-round commitment unconfirmed</option><option value="signed">Signed</option><option value="firm_verbal">Firm verbal commitment</option><option value="conditional">Conditional interest</option></select></Field>
+              <Field title="Round target (EUR)" hint="Numbers, K or M; for example 4M."><input required inputMode="decimal" value={form.target_eur} onChange={event => update("target_eur", event.target.value)} placeholder="Your round target" /></Field>
+              <Field title="Already committed (EUR)" hint="Firm commitments only. Enter 0 if none."><input required inputMode="decimal" value={form.firm_commitments_eur} onChange={event => update("firm_commitments_eur", event.target.value)} placeholder="Firm commitments" /></Field>
               <Field title="Investors already in (excluded)" className="span-two" optional hint="Separate names with commas. These investors are excluded from suggestions."><input value={form.excluded_investors} onChange={event => update("excluded_investors", event.target.value)} placeholder="Investor names" /></Field>
               <Field title="Known competitors" className="span-two" optional hint="Separate company names with commas."><input value={form.known_competitors} onChange={event => update("known_competitors", event.target.value)} placeholder="Company names" /></Field></div>
           </section>
           <details className="advanced-controls"><summary>Additional relationship controls<ChevronDown size={14} /></summary><div className="advanced-controls-content">
-            <Field title="Lead commitment status"><select value={form.lead_status} onChange={event => update("lead_status", event.target.value as FormData["lead_status"])}><option value="unconfirmed">Current-round commitment unconfirmed</option><option value="signed">Signed</option><option value="firm_verbal">Firm verbal commitment</option><option value="conditional">Conditional interest</option></select></Field>
             {form.lead_status === "conditional" && <div className="inline-note"><CircleHelp size={15} /><p>Results and introduction requests will describe this lead commitment as provisional.</p></div>}
             <div className="status-rows">{form.statuses.map((row, index) => <div className="status-row" key={index}>
               <input aria-label={`Investor ${index + 1} name`} required value={row.investor_name} placeholder="Investor name" onChange={event => update("statuses", form.statuses.map((item, idx) => idx === index ? { ...item, investor_name: event.target.value, investor_id: undefined } : item))} />
@@ -324,29 +402,12 @@ export default function Home() {
             <div className="preference-options"><label className="check-row"><input type="checkbox" checked={form.include_angels} onChange={event => update("include_angels", event.target.checked)} /><span>Include angels</span></label><label className="check-row"><input type="checkbox" checked={form.include_corporate_vcs} onChange={event => update("include_corporate_vcs", event.target.checked)} /><span>Include corporate VCs</span></label></div>
             <Field title="Investor countries" optional hint="Leave blank for all countries. Separate countries with commas."><input value={form.investor_countries} onChange={event => update("investor_countries", event.target.value)} placeholder="Finland, Sweden, United Kingdom" /></Field>
           </div></details>
+          <label className="check-row confirm-check"><input type="checkbox" checked={profileReviewed} onChange={event => setProfileReviewed(event.target.checked)} /><span>I have reviewed my round details.</span></label>
           {error && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>{error}</span></div>}
-          <div className="form-footer"><span><ShieldCheck size={14} />You review every request.</span><button className="button primary large" disabled={busy} type="submit">{busy ? <LoaderCircle size={16} className="spinning" /> : <Network size={16} />}{busy ? "Matching in Cala…" : "Match entities in Cala"}<ArrowRight size={16} /></button></div>
-        </form>
-        <aside className="guidance-sidebar"><div className="guidance-card"><span className="eyebrow">A connection, with context</span><NetworkGraphic /><h3>Start with the network<br />you already have.</h3><p>Confirm your company and lead, then explore their sourced funding connections.</p><div className="guidance-divider" /><ul className="benefit-list"><li><GitBranch size={16} /><span>Shared rounds, backed by Cala</span></li><li><FileCheck2 size={16} /><span>Fit and allocation estimates</span></li><li><Copy size={16} /><span>A request ready to copy</span></li></ul></div>
-          <div className="allocation-preview"><span className="eyebrow">Your allocation preview</span><strong>{previewGap == null ? "—" : money(previewGap)}</strong><span>Remaining after firm commitments</span></div>
-          <p className="sidebar-footnote"><CircleHelp size={14} />You choose what to ask, and who to approach.</p></aside></div></>}
-
-      {phase === "confirm" && resolution && <><button className="back-link" onClick={editProfile}><ArrowLeft size={14} />Edit your round</button><div className="hero compact"><div><h1>Let&apos;s make sure<br /><span>we have the right lead.</span></h1><p>Your confirmation starts the search. Your startup profile stays in your hands.</p></div></div>
-        <div className="workspace-grid"><div className="confirmation-main"><section className="confirmation-section"><div className="section-heading"><span className="section-number mono">01</span><div><h2>{resolution.no_open_allocation ? "No open allocation" : "Choose your lead"}</h2><p>{resolution.no_open_allocation ? "Firm commitments already meet or exceed your round target." : `Cala matches for ${resolution.profile.lead_name || form.lead_name || "your lead"}`}</p></div></div>
-          {resolution.detected_lead && <div className="inline-note detected-lead-note" role="note"><CircleHelp size={15} /><div><p><strong>Lead suggested from funding history.</strong> {resolution.detected_lead.lead.name} appears in {resolution.startup_matches.find(item => item.id === resolution.detected_lead?.company_id)?.name || resolution.profile.startup.company_name}'s {resolution.detected_lead.stage ? label(resolution.detected_lead.stage) : "funding"} round{resolution.detected_lead.event_date ? ` (${dateLabel(resolution.detected_lead.event_date, resolution.detected_lead.event_date_precision)})` : ""}. Confirm that this is the lead you want to use; historical participation does not establish a current-round commitment.</p><Sources sources={resolution.detected_lead.sources} title="detection sources" /></div></div>}
-          <div className="entity-options">{resolution.lead_matches.map(entity => <EntityOption key={entity.id} entity={entity} selected={selectedLead === entity.id} onSelect={() => { setSelectedLead(entity.id); setConfirmed(false); }} />)}</div>
-          {!resolution.lead_matches.length && !resolution.no_open_allocation && <div className="empty-inline"><Network size={24} /><h3>No lead match found</h3><p>Try the investor&apos;s full organization name. You&apos;ll need a confirmed Cala lead to search their network.</p><button className="button secondary" onClick={editProfile}><ArrowLeft size={14} />Refine the name</button></div>}
-          <small className="resolver-time mono">ENTITY LOOKUP · {(resolution.resolver_ms / 1000).toFixed(1)}s · not included in run time</small></section>
-          <section className="confirmation-section"><div className="section-heading"><span className="section-number mono">02</span><div><h2>Confirm your startup profile</h2><p>Your manual profile works even if your company is absent from Cala.</p></div></div>
-            <div className="profile-summary"><div><strong>{resolution.profile.startup.company_name}</strong><span>{resolution.profile.startup.sector}{resolution.profile.startup.country ? ` / ${resolution.profile.startup.country}` : ""}</span></div>{resolution.profile.startup.website && <p>{new URL(resolution.profile.startup.website).hostname}</p>}<dl><div><dt>Round stage</dt><dd>{label(resolution.profile.round.stage)}</dd></div><div><dt>Target / committed</dt><dd>{money(resolution.profile.round.target_eur)} / {money(resolution.profile.round.firm_commitments_eur)}</dd></div></dl></div>
-            {resolution.startup_matches.length > 0 && <div className="startup-matches"><h4>Optional Cala company match</h4><label className="manual-option"><input type="radio" name="startup-match" checked={selectedStartup === null} onChange={() => setSelectedStartup(null)} />Use my manual profile only</label>{resolution.startup_matches.map(entity => <EntityOption key={entity.id} entity={entity} selected={selectedStartup === entity.id} onSelect={() => setSelectedStartup(entity.id)} />)}<p className="field-hint">A match records the company identity. The startup details above remain the founder-approved profile.</p></div>}
-          </section>
-          {detectedCompanyMismatch && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>This lead was suggested from a different company match. Choose the company used for detection, or edit your round and enter the lead explicitly.</span></div>}
-          {resolution.notices.map((notice, idx) => <div className="inline-note" key={idx}><CircleHelp size={15} /><p>{notice}</p></div>)}
-          <label className="check-row confirm-check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>I confirm this is the correct lead and startup profile.</span></label>
-          {error && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>{error}</span></div>}
-          <div className="form-footer"><span><Clock3 size={14} />Up to 90 seconds after confirmation</span><button type="button" className="button primary large" disabled={!confirmed || busy || detectedCompanyMismatch || (!selectedLead && !resolution.no_open_allocation)} onClick={() => void beginRun()}>{busy ? <LoaderCircle size={16} className="spinning" /> : <ArrowRight size={16} />}{resolution.no_open_allocation ? "Confirm round summary" : "Find my co-investors"}</button></div></div>
-          <aside className="guidance-sidebar"><div className="guidance-card"><span className="eyebrow">Before we begin</span><NetworkGraphic /><h3>The right entity.<br />A stronger starting point.</h3><p>Check the organization&apos;s website, country and description. Similar names can belong to different investors.</p><div className="guidance-divider" /><p>Missing public company details won&apos;t hold you back. We use your manual startup profile as the context for fit.</p></div></aside></div></>}
+          <div className="form-footer"><span><Clock3 size={14} />The search starts after your review.</span><button className="button primary large" disabled={busy || !profileReviewed} type="submit">{busy ? <LoaderCircle size={16} className="spinning" /> : <Network size={16} />}{busy ? "Starting your search..." : "Find my co-investors"}<ArrowRight size={16} /></button></div>
+        </form><aside className="guidance-sidebar"><div className="guidance-card"><span className="eyebrow">Your details, reviewed</span><NetworkGraphic /><h3>Public facts.<br />Your current round.</h3><p>Cala supplies the known company details. You supply the current fundraising plan and confirm what we should use.</p><div className="guidance-divider" /><p>Fields without supported data stay empty. You can edit every prefilled detail before starting.</p></div><div className="allocation-preview"><span className="eyebrow">Your allocation preview</span><strong>{previewGap == null ? "—" : money(previewGap)}</strong><span>Remaining after firm commitments</span></div><p className="sidebar-footnote"><CircleHelp size={14} />You choose what to ask, and who to approach.</p></aside></div>
+        {identity.notices.map((notice, index) => <div className="inline-note" key={index}><CircleHelp size={15} /><p>{notice}</p></div>)}
+      </>}
 
       {phase === "running" && <><div className="hero compact"><div><span className="running-label"><span className="live-dot" />Search in progress</span><h1>Following the connections.<br /><span>Building your shortlist.</span></h1><p>Retrieving shared rounds, reviewing investor context, and preparing your next ask.</p></div><div className="timer"><strong className="mono">{String(Math.floor(elapsed / 60)).padStart(2, "0")}:{String(elapsed % 60).padStart(2, "0")}</strong><span>of a 90-second target</span></div></div>
         <div className="progress-steps">{STEPS.map((step, idx) => <div key={step} className={idx === activeStep ? "current" : idx < activeStep ? "done" : ""}><span>{idx < activeStep ? <Check size={13} /> : idx === activeStep ? <LoaderCircle size={13} className="spinning" /> : String(idx + 1).padStart(2, "0")}</span><strong>{step}</strong></div>)}</div>
@@ -360,8 +421,8 @@ export default function Home() {
     </div></main></div>;
 }
 
-function EntityOption({ entity, selected, onSelect }: { entity: Entity; selected: boolean; onSelect: () => void }) {
-  return <div className={`entity-option ${selected ? "selected" : ""}`}><button type="button" className="entity-choice" onClick={onSelect} aria-pressed={selected}>
+function EntityOption({ entity, selected, onSelect, disabled = false }: { entity: Entity; selected: boolean; onSelect: () => void; disabled?: boolean }) {
+  return <div className={`entity-option ${selected ? "selected" : ""}`}><button type="button" className="entity-choice" onClick={onSelect} disabled={disabled} aria-pressed={selected}>
     <span className="selection-circle">{selected && <Check size={13} />}</span><div><strong>{entity.name}</strong><EntityIdentity entity={entity} />{entity.description && <p>{entity.description}</p>}</div></button>
     <div className="entity-evidence">{entity.website && <a href={entity.website} target="_blank" rel="noopener noreferrer">{new URL(entity.website).hostname}<ExternalLink size={11} /></a>}<Sources sources={entity.sources} title="sources" /><small className="mono">{entity.id}</small></div><EntityMetadata entity={entity} /></div>;
 }

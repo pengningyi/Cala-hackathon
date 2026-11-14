@@ -93,6 +93,25 @@ export interface ResolveRequest {
   lookup_startup: boolean;
 }
 
+export interface CompanyMatches {
+  id: string;
+  startup_matches: Entity[];
+  lead_matches: Entity[];
+  resolver_ms: number;
+  created_at: string;
+  expires_at: string;
+  notices: string[];
+}
+
+export interface OnboardingConfirmation {
+  resolution_id: string;
+  startup: Entity;
+  lead: Entity;
+  prefill: { company_name: string; website: string; sector: string; country: string };
+  prefill_sources: Record<string, Source[]>;
+  notices: string[];
+}
+
 export interface Resolution {
   id: string;
   profile: FounderInput;

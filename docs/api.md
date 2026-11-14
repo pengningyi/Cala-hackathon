@@ -5,7 +5,44 @@ interactive requests are available at `/docs`. Amounts are decimal EUR, serializ
 as strings. Country names or common ISO codes are normalized by shared backend
 mappings. Do not send API credentials in founder payloads.
 
-## 1. Resolve the lead
+## 1. Match company identities, then complete the round
+
+`POST /api/onboarding/matches` accepts only names:
+
+```json
+{"company_name":"Cala AI","lead_name":"Lightspeed Venture Partners"}
+```
+
+Both names are required. Returns `CompanyMatches`: `id`, `startup_matches`,
+`lead_matches`, `resolver_ms`, `created_at`, `expires_at` and `notices`. Cala
+searches and optional metadata enrichment share the resolver deadline and call
+budget. No founder round, funding discovery or model assessment is required.
+Neither the first match nor a single result is implicitly confirmed.
+
+`POST /api/onboarding/matches/{id}/confirm` accepts exact offered IDs:
+
+```json
+{"startup_id":"chosen-company-id","lead_id":"chosen-lead-id"}
+```
+
+Returns `CompanyConfirmation`: `resolution_id`, `startup`, `lead`, `prefill`,
+`prefill_sources`, `expires_at`, and `notices`. `prefill` contains canonical
+`company_name`, `website`, `sector` and `country`; unsupported fields are empty
+strings. `prefill_sources` maps field names to the original dated source records.
+Sector uses explicit sourced industry/sector metadata, and HQ excludes a known
+registration-only country. Descriptions, generic entity types and historical
+funding stages do not fill current founder facts.
+
+The user edits supported prefills and supplies missing profile fields, stage,
+target and committed amount. Submit the completed `FounderInput` through
+`POST /api/runs` with this `resolution_id`, the confirmed `lead_id`, and
+`profile_confirmed: true`. The company Cala ID and canonical company/lead names
+must match the confirmed pair. Changed identities require a fresh confirmation;
+expired matches or confirmations return HTTP 404. An empty current allocation
+still skips the funding-discovery run, although company matching happened earlier.
+
+### Legacy full-profile resolution
+
 
 `POST /api/resolve`
 
@@ -101,23 +138,27 @@ precedence over names; do-not-contact wins conflicting statuses.
 
 ```json
 {
-  "resolution_id": "ID returned by resolution",
+  "resolution_id": "ID returned by company confirmation or legacy resolution",
   "lead_id": "Cala ID explicitly chosen from lead_matches",
   "profile_confirmed": true,
-  "profile": { "...": "the full founder-approved profile from step 1" }
+  "profile": { "...": "the completed founder-approved round profile" }
 }
 ```
 
 The abbreviated `profile` above is illustrative; submit the actual complete
-`FounderInput`, including any manual startup corrections. A changed lead name
-requires resolution again. If matching a startup, set `startup.cala_entity_id` to
-an ID offered in this resolution's `startup_matches`; otherwise leave it null for
-a manual profile. The founder's own matched company is not flagged as a competing
-portfolio business. An unoffered lead/startup ID, missing confirmation, or expired
-resolution is rejected. The backend takes an immutable snapshot on confirmation.
+`FounderInput`, including edited company details and current-round fields.
+Identity-first confirmation requires the exact confirmed company Cala ID and
+canonical company/lead names. A different pair requires matching and confirmation
+again. The legacy `/api/resolve` flow also permits a manual startup without a Cala
+ID; supplied IDs must come from that resolution. The founder's own matched company
+is not flagged as a competing portfolio business. Unoffered IDs, missing review
+confirmation and expired tokens are rejected. The backend takes an immutable
+profile snapshot when the reviewed run starts.
 
-If firm commitments meet the target, resolution makes no Cala calls. Confirmation
-may use `lead_id: null` and the run ends in `no_open_allocation` without searching.
+Firm commitments meeting the target produce `no_open_allocation` without funding
+discovery. Identity-first company matching still happened before these amounts
+were entered. Legacy full-profile resolution can skip matching too and accept
+`lead_id: null` when no allocation remains.
 Conditional interest never reduces the remaining allocation. A conditional lead's
 ticket is supplied as conditional context, outside firm commitments.
 
@@ -202,10 +243,12 @@ ratings; missing numerical inputs contribute zero.
 `{role: "user" | "assistant", content: string}` entries of 4,000 characters each.
 The optional selection must identify a shortlisted investor from this run.
 Responses include `message`, sourced `citations`, referenced `candidate_ids`, and
-`model_used`. The current assistant runs locally over the immutable result and
-returns `model_used: false`; no new Cala or foundation-model request is made.
-History supports the conversation UI; answers use the current question, selected
-investor and saved evidence. Unsupported questions receive scope guidance.
+`model_used`. Successful runtime replies use the configured Codex CLI or
+OpenAI-compatible API and return `model_used: true`. Each question triggers a
+model request with the immutable result, selected investor and bounded recent
+conversation history. No new Cala query is made. The backend resolves returned
+citation references and investor IDs against the supplied evidence; the model
+cannot add arbitrary source URLs or replace source dates.
 
 Supported topics include priorities, comparison, shared-event graph paths, saved
 introduction/follow-up requests, participation criteria, unknowns, considerations
@@ -213,6 +256,11 @@ and exclusions, plus main's flags and estimated allocation percentages. Answers
 preserve the recorded ranking and never change founder
 statuses or run new discovery. Sources retain their dates. Pending results return
 HTTP 409, missing/expired runs 404, invalid selection 400, and invalid input 422.
+Disabled or unavailable model configuration returns an explicit error rather
+than a successful canned response. Generation deadlines and concurrent capacity
+are controlled by `CHAT_TIMEOUT_SECONDS` and `CHAT_MAX_CONCURRENCY` separately
+from discovery. Provider failures, invalid output and timeouts use the standard
+error envelope so the UI can retain the question and offer a retry.
 
 ## Errors and retention
 

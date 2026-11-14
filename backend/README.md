@@ -25,10 +25,18 @@ Never commit `.env` or API keys.
 
 The default `MODEL_PROVIDER=codex` uses the installed Codex CLI and your existing
 login. `CODEX_EXECUTABLE` can be an absolute path if Codex is absent from PATH.
-It runs ephemeral, read-only structured assessment requests with external tools
-disabled. It receives only the founder profile and retrieved Cala facts; Cala
+It runs ephemeral, read-only structured model requests with external tools
+disabled. It receives the founder profile and retrieved Cala facts; Cala
 credentials are excluded from its subprocess environment. A slow/unavailable model
 leaves semantic fit unknown and uses deterministic introduction templates.
+Live chat uses the same provider with a separate generation request for each
+question, including recent conversation history, the selected investor and a
+bounded snapshot of the saved result. Replies can explain scores, relationships,
+allocation and next steps or help draft an introduction. They do not change the
+run or perform new discovery. Returned citations resolve only to saved sources.
+Chat failures produce an explicit retryable error rather than a canned answer.
+`CHAT_TIMEOUT_SECONDS=60` and `CHAT_MAX_CONCURRENCY=2` control chat independently
+of the discovery assessment budget.
 
 To use your own foundation model instead:
 
@@ -41,7 +49,8 @@ MODEL_NAME=your-model
 
 The provider must support `/chat/completions` and JSON-schema structured output.
 Native APIs using another protocol need a `SemanticProvider` adapter. No specific
-model is imposed. `MODEL_PROVIDER=disabled` keeps semantic assessments unknown.
+model is imposed. `MODEL_PROVIDER=disabled` keeps semantic assessments unknown
+and makes live chat unavailable until a provider is enabled.
 The model never sets scores, weights, entity identities or exclusion rules.
 The current writer uses sourced templates for every completed card. Semantic
 overlap assessment uses the selected model when it completes in budget; main's
@@ -49,12 +58,21 @@ sector score uses its deterministic keyword rule rather than the model's rating.
 The local CLI structured-output smoke test passed with network access. Verify
 login, network access and model latency on the machine running the service.
 
-On `branch-basic`, the basic form matches main: company, website, sector, optional
-HQ country, Pre-seed/Seed/Series A/Series B, target, commitments, optional lead,
-investors already in and known competitors. A blank lead triggers bounded
-auto-detection from an exact company funding event with a sourced explicit lead
-role. The founder still confirms the offered IDs. Historical lead detection does
-not assert current commitment; the default status is `unconfirmed`.
+On `branch-basic`, setup starts with only the founder company and lead investor
+names. `/api/onboarding/matches` searches both identities without requiring a
+round profile. The founder explicitly selects and confirms both matches through
+`/api/onboarding/matches/{id}/confirm`. Confirmation returns a token, the two
+entities, editable company website/sector/HQ prefills and their source references.
+Unknowns stay empty. Explicit Cala industry relationships can supply broad sector
+labels; descriptions and registration addresses do not substitute for field facts.
+
+The founder then enters the missing fields, current stage, target and commitments
+and submits the completed profile to `/api/runs` with the confirmation token.
+Neither historical stage nor round totals prefill current fundraising facts.
+The selected identities are enforced server-side; other profile fields remain
+editable. Lead commitment starts as `unconfirmed`. Matching and confirmation do
+not start funding discovery or model assessment. The older `/api/resolve` contract
+remains available for existing full-profile API clients.
 
 The server-side engine in `app/main_scoring.py` is ported from main at `1fed306`.
 Unknown signals contribute zero. `app/scoring.py` adapts sourced typed profiles,

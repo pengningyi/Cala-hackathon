@@ -354,7 +354,7 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .candidate-metrics > div > span, .summary-strip span { white-space: normal; }
 .progress-steps strong { font-size: 11px; }
 
-/* Results workspace: conversation and shortlist beside the evidence graph. */
+/* Results workspace: shortlist above insights beside the evidence graph. */
 .results-content { max-width: 1520px; padding: 22px 30px 0; }
 .main-panel-results .page-topline { display: none; }
 .workspace-top { margin: 0 0 14px; min-height: 32px; }
@@ -368,21 +368,19 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .workspace-summary strong { font-size: 21px; }
 .workspace-summary span { font-size: 11px; }
 .results-workspace-view .result-meta { margin: 9px 0 12px; font-size: 11px; }
-.workspace-notices { margin: 0 0 16px; }
-.workspace-notices summary { padding: 10px 13px; }
-.result-workspace { display: grid; grid-template-columns: minmax(350px, .92fr) minmax(0, 1.08fr); grid-template-rows: minmax(0, 1.1fr) minmax(0, 1.1fr); gap: 16px; height: 800px; }
-.workspace-chat-panel { grid-column: 1; grid-row: 1; min-height: 0; min-width: 0; }
+.result-workspace { display: grid; grid-template-columns: minmax(350px, .92fr) minmax(0, 1.08fr); grid-template-rows: minmax(520px, 1.08fr) minmax(480px, 1fr); gap: 16px; height: 1020px; }
+.workspace-chat-panel { grid-column: 1; grid-row: 2; min-height: 0; min-width: 0; }
 .workspace-graph-panel { grid-column: 2; grid-row: 1 / span 2; min-height: 0; min-width: 0; }
-.workspace-shortlist { grid-column: 1; grid-row: 2; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; border: 1px solid #e5e2eb; background: var(--surface); border-radius: 15px; box-shadow: 0 2px 7px #24202e04; }
+.workspace-shortlist { grid-column: 1; grid-row: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; border: 1px solid #e5e2eb; background: var(--surface); border-radius: 15px; box-shadow: 0 2px 7px #24202e04; }
 .workspace-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 17px 19px 13px; margin: 0; flex-shrink: 0; border-bottom: 1px solid var(--line); }
 .workspace-panel-heading h2 { font-size: 15px; }
 .workspace-panel-heading p { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .workspace-count { border-radius: 7px; background: var(--tint); padding: 5px 8px; color: var(--muted); flex-shrink: 0; }
 .workspace-investor-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 9px; scrollbar-width: thin; scrollbar-color: #d8d3e0 transparent; }
-.workspace-investor-row { display: flex; gap: 2px; align-items: center; border-radius: 9px; border: 1px solid transparent; margin: 3px 0; padding-right: 5px; }
+.workspace-investor-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0 2px; align-items: center; border-radius: 9px; border: 1px solid transparent; margin: 3px 0; padding-right: 5px; }
 .workspace-investor-row:hover { background: #faf9fc; }
 .workspace-investor-row.is-selected { background: #f6f3fa; border-color: #e6dff0; }
-.workspace-investor-select { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 9px; color: var(--foreground); }
+.workspace-investor-select { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 9px; color: var(--foreground); line-height: 1.3; }
 .workspace-rank { font-size: 10px; color: #8b8195; width: 20px; flex-shrink: 0; }
 .workspace-investor-name { flex: 1; min-width: 0; }
 .workspace-investor-name strong { font-size: 13px; font-weight: 550; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -528,10 +526,10 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .kg-empty h3 { font-size: 16px; color: #54485f; margin: 15px 0 9px; }
 .kg-empty p { max-width: 350px; font-size: 13px; color: var(--muted); line-height: 1.8; }
 
-@media (min-height: 1100px) and (min-width: 1000px) { .result-workspace { height: min(980px, calc(100vh - 370px)); } }
+@media (min-height: 1100px) and (min-width: 1000px) { .result-workspace { height: max(1020px, min(1120px, calc(100vh - 180px))); } }
 @media (max-width: 1100px) { .results-content { padding: 22px 23px 0; } .result-workspace { grid-template-columns: minmax(320px, .95fr) minmax(0, 1.05fr); } .rc-chat-scope { display: none; } .workspace-investor-select { gap: 6px; padding: 9px 6px; } .workspace-investor-score small { display: none; } .workspace-rank { width: 17px; } .workspace-shortlist-footer { flex-wrap: wrap; gap: 4px; } .kg-toolbar { padding: 16px 15px; } .kg-toolbar h2 { font-size: 15px; } .kg-selection { align-items: flex-start; padding-inline: 14px; } .kg-selection > span { max-width: 65%; } }
-@media (max-width: 850px) { .result-workspace { height: auto; grid-template-columns: 1fr; grid-template-rows: auto; } .workspace-chat-panel { grid-row: 1; grid-column: 1; height: 470px; } .workspace-shortlist { grid-row: 2; grid-column: 1; max-height: 420px; min-height: 260px; } .workspace-graph-panel { grid-row: 3; grid-column: 1; height: 740px; } .workspace-investor-score small { display: inline; } .workspace-investor-select { padding: 10px; gap: 10px; } .workspace-extra-results { grid-template-columns: 1fr; } .workspace-hero h1 { font-size: 28px; } .workspace-top-actions { gap: 8px; } .rc-chat-scope { display: flex; } .kg-toolbar h2 { font-size: 17px; } }
-@media (max-width: 500px) { .results-content { padding: 17px 15px 0; } .workspace-top { gap: 12px; flex-wrap: wrap; margin-bottom: 10px; } .workspace-top-actions { width: 100%; justify-content: space-between; } .workspace-top-actions .button { font-size: 10px; padding: 7px 8px; } .workspace-hero h1 { font-size: 25px; } .workspace-summary { padding: 0; } .workspace-summary > div { padding: 12px 14px; } .workspace-summary strong { font-size: 19px; } .results-workspace-view .result-meta { line-height: 1.7; } .workspace-chat-panel { height: 505px; } .workspace-graph-panel { height: 680px; } .rc-chat-header { padding: 14px; } .rc-chat-heading { gap: 8px; } .rc-chat-heading p { font-size: 10px; } .rc-chat h2 { font-size: 14px; } .rc-chat-scope { display: none; } .rc-chat-thread { padding: 13px; } .rc-chat-selection { padding: 8px 13px; } .rc-chat-suggestions { padding: 7px 12px 9px; } .rc-chat-suggestions button { font-size: 10px; } .rc-chat-composer { padding-inline: 11px; } .rc-chat-composer-hint { font-size: 8px; } .workspace-panel-heading { padding: 14px; } .workspace-investor-list { padding-inline: 5px; } .workspace-investor-select { padding: 9px 5px; gap: 6px; } .workspace-rank { display: none; } .workspace-investor-name strong { font-size: 12px; } .workspace-investor-name small { font-size: 9px; } .workspace-investor-score { font-size: 17px; } .workspace-copy-icon, .workspace-icon-button { padding: 5px; } .workspace-shortlist-footer { padding: 10px 13px; } .workspace-combined { left: 7px; right: 7px; } .kg-toolbar { padding: 14px; } .kg-toolbar h2 { font-size: 15px; } .kg-kicker { font-size: 9px; } .kg-controls button { height: 27px; width: 27px; } .kg-selection { padding: 10px 13px; font-size: 10px; } .kg-selection button { font-size: 9px; } .kg-inspector { flex-basis: 175px; padding: 14px; } .kg-legend { gap: 7px 12px; padding-inline: 13px; font-size: 9px; } .kg-caption { padding-inline: 13px; font-size: 9px; } .investor-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 20px); } .investor-dialog-heading { padding: 16px; } .investor-dialog-heading h2 { font-size: 18px; } .investor-dialog-body { padding: 11px; } }
+@media (max-width: 850px) { .result-workspace { height: auto; grid-template-columns: 1fr; grid-template-rows: auto; } .workspace-chat-panel { grid-row: 2; grid-column: 1; height: 600px; } .workspace-shortlist { grid-row: 1; grid-column: 1; max-height: 420px; min-height: 260px; } .workspace-graph-panel { grid-row: 3; grid-column: 1; height: 740px; } .workspace-investor-score small { display: inline; } .workspace-investor-select { padding: 10px; gap: 10px; } .workspace-extra-results { grid-template-columns: 1fr; } .workspace-hero h1 { font-size: 28px; } .workspace-top-actions { gap: 8px; } .rc-chat-scope { display: flex; } .kg-toolbar h2 { font-size: 17px; } }
+@media (max-width: 500px) { .results-content { padding: 17px 15px 0; } .workspace-top { gap: 12px; flex-wrap: wrap; margin-bottom: 10px; } .workspace-top-actions { width: 100%; justify-content: space-between; } .workspace-top-actions .button { font-size: 10px; padding: 7px 8px; } .workspace-hero h1 { font-size: 25px; } .workspace-summary { padding: 0; } .workspace-summary > div { padding: 12px 14px; } .workspace-summary strong { font-size: 19px; } .results-workspace-view .result-meta { line-height: 1.7; } .workspace-chat-panel { height: 620px; } .workspace-graph-panel { height: 680px; } .rc-chat-header { padding: 14px; } .rc-chat-heading { gap: 8px; } .rc-chat-heading p { font-size: 10px; } .rc-chat h2 { font-size: 14px; } .rc-chat-scope { display: none; } .rc-chat-thread { padding: 13px; } .rc-chat-selection { padding: 8px 13px; } .rc-chat-suggestions { padding: 7px 12px 9px; } .rc-chat-suggestions button { font-size: 10px; } .rc-chat-composer { padding-inline: 11px; } .rc-chat-composer-hint { font-size: 8px; } .workspace-panel-heading { padding: 14px; } .workspace-investor-list { padding-inline: 5px; } .workspace-investor-select { padding: 9px 5px; gap: 6px; } .workspace-rank { display: none; } .workspace-investor-name strong { font-size: 12px; } .workspace-investor-name small { font-size: 9px; } .workspace-investor-score { font-size: 17px; } .workspace-copy-icon, .workspace-icon-button { padding: 5px; } .workspace-shortlist-footer { padding: 10px 13px; } .workspace-combined { left: 7px; right: 7px; } .kg-toolbar { padding: 14px; } .kg-toolbar h2 { font-size: 15px; } .kg-kicker { font-size: 9px; } .kg-controls button { height: 27px; width: 27px; } .kg-selection { padding: 10px 13px; font-size: 10px; } .kg-selection button { font-size: 9px; } .kg-inspector { flex-basis: 175px; padding: 14px; } .kg-legend { gap: 7px 12px; padding-inline: 13px; font-size: 9px; } .kg-caption { padding-inline: 13px; font-size: 9px; } .investor-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 20px); } .investor-dialog-heading { padding: 16px; } .investor-dialog-heading h2 { font-size: 18px; } .investor-dialog-body { padding: 11px; } }
 .workspace-investor-name small, .workspace-investor-score small, .workspace-shortlist-footer > span,
 .workspace-shortlist-footer .button, .rc-chat-scope, .rc-chat-role, .rc-chat-investors button,
 .rc-chat-citations summary, .rc-chat-citations li > span, .rc-chat-answer-meta, .rc-chat-copy,
@@ -607,12 +605,8 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .ticket-estimate { background: #f8f6fa; border: 1px solid var(--line); border-radius: 9px; padding: 14px; margin: 18px 0; }
 .ticket-estimate h4 { margin: 0 0 7px; font-size: 13px; }
 .ticket-estimate p { margin: 0; font-size: 12px; line-height: 1.8; color: var(--muted); }
-.workspace-allocation { border: 1px solid var(--line); border-radius: 15px; padding: 22px 24px; margin-top: 18px; background: #fff; }
-.workspace-allocation-heading { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
-.workspace-allocation-heading h2 { margin: 5px 0 0; font-size: 19px; }
-.workspace-allocation-heading p { margin: 0; font-size: 12px; color: var(--muted); }
-.workspace-allocation-rows { display: grid; gap: 14px; }
-.workspace-allocation-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(80px, 2fr) minmax(100px, .7fr); gap: 20px; align-items: center; }
+.workspace-allocation-summary { flex-shrink: 0; border-top: 1px solid var(--line); margin: 0 17px; padding: 10px 0 7px; }
+.workspace-allocation-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(48px, 1fr) auto; gap: 15px; align-items: center; }
 .workspace-allocation-name { min-width: 0; }
 .workspace-allocation-name strong { display: block; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .workspace-allocation-name small { display: block; font-size: 11px; margin-top: 3px; color: var(--muted); }
@@ -622,7 +616,9 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .workspace-allocation-amount { display: flex; align-items: end; flex-direction: column; gap: 3px; font-size: 12px; }
 .workspace-allocation-amount strong { font-weight: 500; }
 .workspace-allocation-amount span { color: var(--muted); font-size: 11px; }
-.workspace-allocation-note { font-size: 11px; line-height: 1.8; color: var(--muted); margin: 18px 0 0; max-width: 900px; }
+.workspace-allocation-note { font-size: 11px; line-height: 1.8; color: var(--muted); margin: 9px 0 0; }
+.workspace-allocation-note summary { cursor: pointer; width: fit-content; }
+.workspace-allocation-note p { margin: 7px 0 0; font-size: 11px; line-height: 1.8; }
 .agent-insights { height: 100%; min-height: 0; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 15px; overflow: hidden; }
 .agent-insight-heading { display: flex; align-items: center; gap: 11px; padding: 17px 19px 15px; }
 .agent-insight-heading h2 { margin: 0; font-size: 15px; line-height: 1.5; }
@@ -665,9 +661,6 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
   .agent-insight-activity .trace-title, .agent-insight-activity .trace-list { padding-inline: 15px; }
 }
 @media (max-width: 600px) {
-  .workspace-allocation { padding: 18px; }
-  .workspace-allocation-heading { display: block; }
-  .workspace-allocation-heading p { margin-top: 9px; line-height: 1.7; }
   .workspace-allocation-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 15px; }
   .workspace-allocation-track { grid-column: 1 / -1; grid-row: 2; }
   .workspace-allocation-amount { grid-column: 2; grid-row: 1; }
@@ -690,4 +683,66 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
   .workspace-investor-row:not(.is-selected) .workspace-investor-name small { display: none; }
   .workspace-shortlist-footer { padding-block: 6px; }
   .workspace-shortlist-footer .button { min-height: 28px; }
+}
+
+/* Suggested allocations share each investor row with the score and copy actions. */
+.workspace-investor-allocation { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 9px 5px 39px; font-size: 11px; line-height: 1.3; color: var(--muted); }
+.workspace-investor-allocation-value { color: var(--foreground); font-weight: 500; }
+.workspace-investor-allocation-share { flex-shrink: 0; }
+.workspace-investor-allocation .workspace-allocation-track { flex: 1; max-width: 100px; height: 4px; }
+.workspace-investor-allocation.is-unavailable { font-size: 10px; }
+@media (min-width: 851px) {
+  .workspace-investor-row .workspace-icon-button, .workspace-investor-row .workspace-copy-icon { min-height: 28px; }
+}
+@media (max-width: 1100px) and (min-width: 851px) {
+  .workspace-investor-allocation { padding-left: 29px; }
+}
+@media (max-width: 500px) {
+  .workspace-investor-allocation { padding-left: 5px; }
+  .workspace-panel-heading p { line-height: 1.6; }
+}
+
+/* Live chat keeps its composer visible while conversation and trace scroll. */
+.agent-insight-chat { padding: 0; overflow: hidden; }
+.rc-chat-embedded { border: 0; border-radius: 0; box-shadow: none; }
+.agent-insight-live { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.agent-insight-live > span { width: 5px; height: 5px; border-radius: 50%; background: #9eaf9b; }
+.agent-insight-chat .rc-chat-bubble p { color: inherit; font-size: 12px; line-height: 1.75; }
+.agent-insight-chat .rc-chat-suggestions { padding-top: 4px; padding-bottom: 8px; }
+.agent-insight-chat .rc-chat-composer { padding-top: 9px; }
+@media (max-width: 600px) {
+  .agent-insight-chat { padding: 0; }
+  .agent-insight-live { font-size: 9px; }
+  .agent-insight-heading { gap: 8px; }
+  .agent-insight-heading h2 { font-size: 14px; }
+  .agent-insight-heading p { max-width: 210px; font-size: 10px; }
+}
+
+/* Identity matching and round details form one guided setup. */
+.onboarding-progress { display: flex; flex-wrap: wrap; gap: 9px 22px; list-style: none; padding: 0; margin: 24px 0 0; color: var(--muted); }
+.onboarding-progress li { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.onboarding-progress li > span { display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid #e4ddeb; border-radius: 50%; font-size: 10px; }
+.onboarding-progress li.is-current { color: var(--foreground); }
+.onboarding-progress li.is-current > span { color: white; border-color: var(--primary); background: var(--primary); }
+.onboarding-progress li.is-complete > span { background: #f2edf7; color: #826d96; }
+.identity-search-form { align-self: start; }
+.identity-search-form .form-section { padding-top: 0; }
+.confirmed-companies { display: flex; align-items: center; gap: 28px; padding: 16px 20px; margin: 0 0 27px; border: 1px solid var(--line); border-radius: 10px; background: #fbfafc; }
+.confirmed-companies > div { display: grid; gap: 3px; min-width: 0; }
+.confirmed-companies > div > span { font-size: 10px; color: var(--muted); }
+.confirmed-companies strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.confirmed-companies-badge { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin-left: auto; color: var(--muted); font-size: 10px; }
+.round-details-form input[readonly] { background: #f8f6fa; color: var(--muted); }
+.prefill-evidence { margin-top: 18px; color: var(--muted); }
+.prefill-evidence > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; list-style: none; font-size: 11px; }
+.prefill-evidence > summary::-webkit-details-marker { display: none; }
+.prefill-evidence > div { display: grid; gap: 13px; padding-top: 14px; }
+.prefill-evidence > div > div > strong { display: block; font-size: 11px; font-weight: 500; text-transform: capitalize; margin-bottom: 4px; }
+@media (max-width: 690px) {
+  .onboarding-progress { gap: 10px 15px; margin-top: 20px; }
+  .onboarding-progress li { font-size: 10px; gap: 5px; }
+  .confirmed-companies { flex-wrap: wrap; gap: 14px 22px; padding: 15px; }
+  .confirmed-companies-badge { width: 100%; margin-left: 0; }
+  .identity-search-form .form-footer { align-items: flex-start; flex-direction: column; }
+  .identity-search-form .form-footer .button { width: 100%; }
 }

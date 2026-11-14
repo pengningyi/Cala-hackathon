@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { Entity, ResolveRequest, Source } from "../lib/types";
+import type { Entity, Source } from "../lib/types";
 
 const source: Source = {
   url: "https://synthetic.example.test/fund-profile", label: "Synthetic fund profile",
@@ -16,16 +16,14 @@ function entity(id: string, overrides: Partial<Entity> = {}): Entity {
 
 async function resolveWith(page: Page, matches: Entity[]) {
   await page.route("**/api/health", route => route.fulfill({ json: { status: "healthy", cala_configured: true, model_provider: "disabled" } }));
-  await page.route("**/api/resolve", route => {
-    const request = route.request().postDataJSON() as ResolveRequest;
+  await page.route("**/api/onboarding/matches", route => {
     return route.fulfill({ json: {
-      id: "synthetic-resolution", profile: request.profile, lead_matches: matches, startup_matches: [],
-      resolver_ms: 25, created_at: "2026-11-14T09:00:00Z", expires_at: "2026-11-14T10:00:00Z",
-      no_open_allocation: false, notices: [],
+      id: "synthetic-matches", lead_matches: matches, startup_matches: [entity("startup", { name: "Cala AI" })],
+      resolver_ms: 25, created_at: "2026-11-14T09:00:00Z", expires_at: new Date(Date.now() + 3600000).toISOString(), notices: [],
     } });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Match entities in Cala", exact: true }).click();
+  await page.getByRole("button", { name: "Find matching companies", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Choose your lead", exact: true })).toBeVisible();
 }
 
@@ -44,7 +42,7 @@ test("full metadata distinguishes headquarters, entity type and investor categor
       { name: "description", value: "<script>window.metadataInjected=true</script>", sources: [] },
     ],
   })]);
-  const match = page.locator(".entity-option").first();
+  const match = page.locator(".confirmation-section").filter({ has: page.getByRole("heading", { name: "Choose your lead", exact: true }) }).locator(".entity-option").first();
   await expect(match.locator(".entity-choice")).toContainText("Headquarters: United States");
   await expect(match.locator(".entity-choice")).toContainText("Entity type: Company");
   await expect(match.locator(".entity-choice")).not.toContainText("Venture capital");
@@ -81,10 +79,10 @@ test("supported investor category and unavailable metadata preserve selectable m
     kind: "vc", entity_type: "Organization", country: "Mauritius", kind_sources: [source],
     metadata_status: "retrieved", metadata: [],
   }), entity("unavailable", { entity_type: "Company", metadata_status: "unavailable" })]);
-  const classified = page.locator(".entity-option").first();
+  const classified = page.locator(".confirmation-section").filter({ has: page.getByRole("heading", { name: "Choose your lead", exact: true }) }).locator(".entity-option").first();
   await expect(classified.locator(".entity-choice")).toContainText("Entity type: Organization");
   await expect(classified.locator(".entity-choice")).toContainText("Investor category: Venture capital");
-  const fallback = page.locator(".entity-option").nth(1);
+  const fallback = page.locator(".confirmation-section").filter({ has: page.getByRole("heading", { name: "Choose your lead", exact: true }) }).locator(".entity-option").nth(1);
   await expect(fallback).toContainText("Additional Cala details could not be retrieved");
   await expect(fallback).toContainText("Synthetic description from Cala.");
   await expect(fallback.locator(".entity-choice")).toContainText("Entity type: Company");

@@ -130,6 +130,43 @@ class ResolveRequest(Model):
     lookup_startup: bool = False
 
 
+class CompanyMatchRequest(Model):
+    company_name: str = Field(min_length=1, max_length=200)
+    lead_name: str = Field(min_length=1, max_length=200)
+
+
+class CompanyMatches(Model):
+    id: str
+    startup_matches: list[Entity]
+    lead_matches: list[Entity]
+    resolver_ms: float
+    created_at: datetime
+    expires_at: datetime
+    notices: list[str] = Field(default_factory=list)
+
+
+class ConfirmCompanyMatches(Model):
+    startup_id: str = Field(min_length=1, max_length=300)
+    lead_id: str = Field(min_length=1, max_length=300)
+
+
+class CompanyPrefill(Model):
+    company_name: str
+    website: str = ""
+    sector: str = ""
+    country: str = ""
+
+
+class CompanyConfirmation(Model):
+    resolution_id: str
+    startup: Entity
+    lead: Entity
+    prefill: CompanyPrefill
+    prefill_sources: dict[str, list[Source]] = Field(default_factory=dict)
+    expires_at: datetime
+    notices: list[str] = Field(default_factory=list)
+
+
 class DetectedLead(Model):
     lead: Entity
     company_id: str | None = None

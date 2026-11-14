@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     model_api_key: str | None = None
     model_name: str | None = None
     model_timeout_seconds: float = Field(default=20, gt=0, le=30)
+    chat_timeout_seconds: float = Field(default=60, gt=0, le=120)
+    chat_max_concurrency: int = Field(default=2, ge=1, le=8)
 
     lookback_months: int = Field(default=60, ge=1, le=120)
     preliminary_limit: int = Field(default=10, ge=1, le=10)

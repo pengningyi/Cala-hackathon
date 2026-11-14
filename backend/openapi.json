@@ -77,6 +77,93 @@
         }
       }
     },
+    "/api/onboarding/matches": {
+      "post": {
+        "summary": "Company Matches",
+        "operationId": "company_matches_api_onboarding_matches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyMatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyMatches"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/onboarding/matches/{match_id}/confirm": {
+      "post": {
+        "summary": "Confirm Company Matches",
+        "operationId": "confirm_company_matches_api_onboarding_matches__match_id__confirm_post",
+        "parameters": [
+          {
+            "name": "match_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Match Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmCompanyMatches"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyConfirmation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/runs": {
       "post": {
         "summary": "Start Run",
@@ -661,6 +748,184 @@
           "model_used"
         ],
         "title": "ChatResponse"
+      },
+      "CompanyConfirmation": {
+        "properties": {
+          "resolution_id": {
+            "type": "string",
+            "title": "Resolution Id"
+          },
+          "startup": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "lead": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "prefill": {
+            "$ref": "#/components/schemas/CompanyPrefill"
+          },
+          "prefill_sources": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Source"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Prefill Sources"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "notices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "resolution_id",
+          "startup",
+          "lead",
+          "prefill",
+          "expires_at"
+        ],
+        "title": "CompanyConfirmation"
+      },
+      "CompanyMatchRequest": {
+        "properties": {
+          "company_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Company Name"
+          },
+          "lead_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Lead Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_name",
+          "lead_name"
+        ],
+        "title": "CompanyMatchRequest"
+      },
+      "CompanyMatches": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "startup_matches": {
+            "items": {
+              "$ref": "#/components/schemas/Entity"
+            },
+            "type": "array",
+            "title": "Startup Matches"
+          },
+          "lead_matches": {
+            "items": {
+              "$ref": "#/components/schemas/Entity"
+            },
+            "type": "array",
+            "title": "Lead Matches"
+          },
+          "resolver_ms": {
+            "type": "number",
+            "title": "Resolver Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "notices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "startup_matches",
+          "lead_matches",
+          "resolver_ms",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "CompanyMatches"
+      },
+      "CompanyPrefill": {
+        "properties": {
+          "company_name": {
+            "type": "string",
+            "title": "Company Name"
+          },
+          "website": {
+            "type": "string",
+            "title": "Website",
+            "default": ""
+          },
+          "sector": {
+            "type": "string",
+            "title": "Sector",
+            "default": ""
+          },
+          "country": {
+            "type": "string",
+            "title": "Country",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "company_name"
+        ],
+        "title": "CompanyPrefill"
+      },
+      "ConfirmCompanyMatches": {
+        "properties": {
+          "startup_id": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Startup Id"
+          },
+          "lead_id": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Lead Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "startup_id",
+          "lead_id"
+        ],
+        "title": "ConfirmCompanyMatches"
       },
       "Consideration": {
         "properties": {
