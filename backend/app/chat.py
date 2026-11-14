@@ -87,16 +87,22 @@ def _summary(card: CandidateCard) -> str:
         text += f" {card.recent_rounds_12m} investment rounds were observed in the last 12 months."
     else:
         text += " Recent investment activity is unknown in this snapshot."
+    if card.review_status == "flagged":
+        text += " Main's scoring rules mark this candidate for review."
+    if card.flags:
+        text += " Flags: " + "; ".join(flag.reason for flag in card.flags) + "."
     return text
 
 
 def answer_result(result: RunResult, request: ChatRequest) -> ChatResponse:
     """Use exactly the stored fields, keeping factual sources and unknowns intact."""
+    query = f" {_normalize(request.message)} "
+    allocation_question = any(word in query for word in ("allocation", "percentage", "percent", "fill the round", "investing"))
     if result.state == "no_open_allocation":
         return ChatResponse(message="There is no open allocation: firm commitments meet or exceed the round target. "
                             "No co-investor search was performed. Adjust the founder profile if your round changes.",
                             citations=[], candidate_ids=[], model_used=False)
-    if not result.candidates:
+    if not result.candidates and not allocation_question:
         if result.state == "failed":
             message = "The search could not finish. A failed retrieval does not establish that no co-investors exist. "
             message += "You can adjust the profile or rerun the search; I cannot recommend an unsupported investor."
@@ -106,11 +112,35 @@ def answer_result(result: RunResult, request: ChatRequest) -> ChatResponse:
                        "An incomplete profile is not a rejection. Review search coverage and exclusions or rerun.")
         return ChatResponse(message=message, citations=[], candidate_ids=[], model_used=False)
 
-    query = f" {_normalize(request.message)} "
     chosen = _selected(result, request)
     citations: list[Source] = []
     citation_groups: list[list[Source]] = []
-    if any(word in query for word in ("exclude", "excluded", "do not contact", "declined")):
+    if allocation_question:
+        chosen = []
+        if result.allocation:
+            message = "Suggested allocation from main's greedy allocation method:\n" + "\n".join(
+                f"- {item.name}: {_eur(item.amount_eur)} ({item.percentage:.2f}% of the open allocation)."
+                for item in result.allocation)
+            included = {item.investor_id for item in result.allocation if item.investor_id}
+            chosen = [card for card in result.candidates if card.investor.id in included]
+            citation_groups = [[source for funding in card.profile.rounds + card.shared_deals
+                                if funding.total_amount_eur is not None for source in funding.sources]
+                               for card in chosen]
+        else:
+            message = "No investor allocation estimate is available in this result."
+        message += ("\n\nTicket estimates divide historical EUR round totals by the number of identified investors "
+                    "and use the median. This is an equal-share heuristic, not a recorded individual check or a commitment. "
+                    "Unknown tickets remain unallocated. Percentages describe the open amount, not a probability of investing.")
+    elif any(word in query for word in ("flag", "inactive", "lead only", "wrong stage", "skip")):
+        flagged = [card for card in chosen if card.flags]
+        if not flagged and not request.selected_investor_id:
+            flagged = [card for card in result.candidates if card.flags]
+        chosen = flagged
+        message = "Recorded scoring flags:\n" + "\n".join(
+            f"- {card.investor.name}: {flag.reason}" for card in flagged for flag in card.flags) if flagged else "No matching scoring flag is recorded."
+        citations = [source for card in flagged for flag in card.flags for source in flag.sources]
+        message += "\nFlags describe main's scoring rules for this snapshot. Confirm current appetite and relationship context before acting."
+    elif any(word in query for word in ("exclude", "excluded", "do not contact", "declined")):
         if result.exclusions:
             message = "Recorded exclusions:\n" + "\n".join(
                 f"- {item.investor.name}: {item.reason}" for item in result.exclusions)
@@ -122,7 +152,7 @@ def answer_result(result: RunResult, request: ChatRequest) -> ChatResponse:
     elif any(word in query for word in ("draft", "introduction", "introduce", "follow up", "request", "write")):
         combined = any(word in query for word in ("combined", "all", "top three", "top 3"))
         if combined and result.combined_draft:
-            chosen = result.candidates[:3]
+            chosen = [card for card in result.candidates if card.review_status == "short"][:3]
             message = "Saved combined request from this run:\n\n" + result.combined_draft
         else:
             chosen = chosen[:1]
@@ -169,7 +199,10 @@ def answer_result(result: RunResult, request: ChatRequest) -> ChatResponse:
             unknown = [component.name.replace("_", " ") for component in chosen[0].components if not component.known]
             if unknown:
                 message += "\n\nUnknown scoring fields: " + ", ".join(unknown) + "."
-            message += "\n\nUnknown components keep a neutral value of 0.5. Completeness measures available fields, not reliability or investment likelihood."
+            message += ("\n\nUnknown components contribute zero under main's scoring method. "
+                        if result.scoring_version.startswith("main-") else
+                        "\n\nUnknown components keep a neutral value of 0.5. ")
+            message += "Completeness measures available fields, not reliability or investment likelihood."
             if chosen[0].considerations:
                 message += "\n\nQuestions to confirm:\n" + "\n".join(
                     f"- {item.basis}: {item.text}" for item in chosen[0].considerations[:3])

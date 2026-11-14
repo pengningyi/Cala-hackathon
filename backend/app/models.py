@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
 class Model(BaseModel):
@@ -51,25 +51,33 @@ class Startup(Model):
     cala_entity_id: str | None = None
     company_name: str = Field(min_length=1, max_length=200)
     website: HttpUrl | None = None
-    product_description: str = Field(min_length=1, max_length=4000)
+    product_description: str = Field(default="", max_length=4000)
     sector: str = Field(min_length=1, max_length=200)
-    target_customer: str = Field(min_length=1, max_length=2000)
-    problem_solved: str = Field(min_length=1, max_length=2000)
-    country: str = Field(min_length=2, max_length=100)
+    target_customer: str = Field(default="", max_length=2000)
+    problem_solved: str = Field(default="", max_length=2000)
+    country: str = Field(default="", max_length=100)
     known_competitors: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator("website", mode="before")
+    @classmethod
+    def website_with_scheme(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return (value if "://" in value else "https://" + value) if value else None
+        return value
 
 
 class RoundInput(Model):
-    stage: Literal["seed", "series_a"]
+    stage: Literal["pre_seed", "seed", "series_a", "series_b"]
     target_eur: Decimal = Field(gt=0, max_digits=16, decimal_places=2)
     firm_commitments_eur: Decimal = Field(ge=0, max_digits=16, decimal_places=2)
     conditional_interest_eur: Decimal = Field(default=Decimal(0), ge=0, max_digits=16, decimal_places=2)
-    lead_status: Literal["signed", "firm_verbal", "conditional"]
+    lead_status: Literal["signed", "firm_verbal", "conditional", "unconfirmed"] = "unconfirmed"
     lead_ticket_eur: Decimal | None = Field(default=None, ge=0, max_digits=16, decimal_places=2)
 
     @model_validator(mode="after")
     def validate_ticket(self):
-        if self.lead_status != "conditional" and self.lead_ticket_eur is not None:
+        if self.lead_status in ("signed", "firm_verbal") and self.lead_ticket_eur is not None:
             if self.lead_ticket_eur > self.firm_commitments_eur:
                 raise ValueError("Firm lead ticket cannot exceed total firm commitments")
         return self
@@ -111,7 +119,8 @@ class FounderInput(Model):
     founder_name: str | None = Field(default=None, max_length=200)
     startup: Startup
     round: RoundInput
-    lead_name: str = Field(min_length=1, max_length=200)
+    lead_name: str = Field(default="", max_length=200)
+    excluded_investors: list[str] = Field(default_factory=list, max_length=100)
     investor_statuses: list[StatusEntry] = Field(default_factory=list, max_length=100)
     preferences: Preferences = Field(default_factory=Preferences)
 
@@ -119,6 +128,16 @@ class FounderInput(Model):
 class ResolveRequest(Model):
     profile: FounderInput
     lookup_startup: bool = False
+
+
+class DetectedLead(Model):
+    lead: Entity
+    company_id: str | None = None
+    event_id: str | None = None
+    stage: str | None = None
+    event_date: date | None = None
+    event_date_precision: str | None = None
+    sources: list[Source] = Field(default_factory=list)
 
 
 class Resolution(Model):
@@ -131,6 +150,7 @@ class Resolution(Model):
     expires_at: datetime
     no_open_allocation: bool = False
     notices: list[str] = Field(default_factory=list)
+    detected_lead: DetectedLead | None = None
 
 
 class StartRunRequest(Model):
@@ -236,6 +256,22 @@ class Exclusion(Model):
     sources: list[Source] = Field(default_factory=list)
 
 
+class InvestorFlag(Model):
+    kind: str
+    severity: Literal["red", "grey", "amber"]
+    reason: str
+    company: str | None = None
+    sources: list[Source] = Field(default_factory=list)
+
+
+class AllocationItem(Model):
+    investor_id: str | None = None
+    name: str
+    amount_eur: Decimal = Field(ge=0)
+    percentage: float = Field(ge=0, le=100)
+    basis: str
+
+
 class CandidateCard(Model):
     investor: Entity
     fit_score: int
@@ -253,6 +289,10 @@ class CandidateCard(Model):
     sources: list[Source]
     action: Literal["introduction", "follow_up"]
     draft: str
+    review_status: Literal["short", "flagged"] = "short"
+    flags: list[InvestorFlag] = Field(default_factory=list)
+    estimated_ticket_eur: Decimal | None = Field(default=None, ge=0)
+    ticket_estimate_basis: str | None = None
 
 
 class ProgressEvent(Model):
@@ -286,7 +326,8 @@ class RunResult(Model):
     cala_calls: int
     cache_hits: int
     retrieval_timestamps: list[datetime]
-    scoring_version: str = "prd-v1"
+    scoring_version: str = "main-1fed306"
+    allocation: list[AllocationItem] = Field(default_factory=list)
     error: dict[str, Any] | None = None
 
 

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from .cala import CalaError, CalaMCPProvider
 from .entity_metadata import date_value as _date, parse_entity as _entity, property_value as _value, sources as _sources
-from .models import Entity, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation
+from .models import DetectedLead, Entity, FundingRound, GraphSnapshot, InvestmentObservation, InvestorProfile, Participation
 from .runtime import BudgetExceeded
 
 
@@ -156,6 +156,63 @@ class CalaNativeProvider:
         response, _ = await self._entity_projection(entity_id, investment_edges=False)
         return _entity(response.data, response.retrieved_at, company=company, metadata_retrieved=True)
 
+    async def detect_lead(self, company_id: str) -> DetectedLead | None:
+        """Suggest a lead only from an identified company event and explicit lead role.
+
+        This is a bounded scan, not a declaration of the company's latest funding
+        history. The founder must still confirm the offered entity before a run.
+        """
+        response, _ = await self._entity_projection(company_id, investment_edges=True)
+        today = datetime.now(timezone.utc).date()
+        edges = _edges(response.data, "outgoing", (
+            "PARTICIPATES_IN_FUNDING_ROUND", "PARTICIPATES_IN_CORPORATE_EVENT",
+        ))
+        candidates = {}
+        for edge in edges:
+            if edge.get("entity_type") not in ("FundingRound", "PrivateCompanyFundingRound") or not edge.get("id"):
+                continue
+            role = str(_value(edge, "role", "")).upper()
+            if role and role != "ISSUER":
+                continue
+            event_date = _date(_value(edge, "event_date"))
+            if event_date and event_date > today:
+                continue
+            candidates[edge["id"]] = edge
+        ordered = sorted(candidates.values(), key=lambda item: (
+            -(_date(_value(item, "event_date")) or date.min).toordinal(), item["id"],
+        ))[:self.max_graph_rounds]
+
+        async def read(edge):
+            try:
+                return await self._read_round(edge["id"])
+            except (CalaError, BudgetExceeded):
+                return None
+
+        rounds = [funding for funding in await asyncio.gather(*(read(edge) for edge in ordered))
+                  if funding is not None and funding.company.id == company_id and funding.company.sources and funding.sources
+                  and (funding.event_date is None or funding.event_date <= today)]
+        rounds.sort(key=lambda funding: (-(funding.event_date or date.min).toordinal(), funding.id))
+        for funding in rounds:
+            roles: dict[str, set[bool]] = {}
+            investors = {}
+            for participant in funding.participants:
+                investors[participant.investor.id] = participant.investor
+                if participant.is_lead is not None:
+                    roles.setdefault(participant.investor.id, set()).add(participant.is_lead)
+            explicit_leads = [investors[identifier] for identifier, observations in roles.items()
+                              if observations == {True} and investors[identifier].sources]
+            # One anchor per P0 run. Multiple explicit co-leads require a choice.
+            if len(explicit_leads) != 1:
+                continue
+            lead = explicit_leads[0]
+            evidence = {(str(source.url), source.published_at, source.retrieved_at): source
+                        for source in [*funding.sources, *lead.sources]}
+            return DetectedLead(lead=lead, company_id=company_id, event_id=funding.id,
+                                stage=funding.stage, event_date=funding.event_date,
+                                event_date_precision=funding.event_date_precision,
+                                sources=list(evidence.values()))
+        return None
+
     async def lead_graph(self, lead_id: str, lookback_months: int) -> GraphSnapshot:
         response, _ = await self._investor(lead_id)
         today = datetime.now(timezone.utc).date()
@@ -227,7 +284,8 @@ class CalaNativeProvider:
             observations.append(InvestmentObservation(
                 id=edge["id"], event_date=event_date,
                 event_date_precision=str(precision).lower() if precision else None,
-                stage=_value(edge, "round_label") or _value(edge, "round_type") or _value(edge, "stage"),
+                stage=_value(edge, "round_label") or _value(edge, "round_type") or _value(edge, "stage")
+                      or _stage_label(edge.get("name")),
                 is_lead=is_lead, sources=sources,
             ))
         return InvestorProfile(investor=investor, rounds=rounds, observations=observations, activity_window_complete=False,
@@ -278,3 +336,13 @@ class CalaNativeProvider:
         if funding:
             self._known_rounds[event_id] = funding
         return funding
+
+
+def _stage_label(value: Any) -> str | None:
+    """A typed funding event's exact stage name is an observed stage label."""
+    if not isinstance(value, str):
+        return None
+    label = " ".join(value.lower().replace("_", " ").replace("-", " ").split())
+    if label in {"pre seed", "seed", *(f"series {letter}" for letter in "abcdefgh")}:
+        return value
+    return None

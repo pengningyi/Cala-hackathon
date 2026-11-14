@@ -235,7 +235,7 @@ def test_no_match_never_pads_generic_candidates(tmp_path):
     asyncio.run(scenario())
 
 
-def test_sparse_profile_keeps_unknowns_and_neutral_score_components(tmp_path):
+def test_sparse_profile_keeps_unknowns_and_main_zero_score_components(tmp_path):
     async def scenario():
         # Connection inside 60 months; no observations inside the 24-month profile.
         graph = GraphSnapshot(rounds=[funding("shared", [entity("lead"), entity("sparse")], days=1000)], complete=True)
@@ -244,9 +244,31 @@ def test_sparse_profile_keeps_unknowns_and_neutral_score_components(tmp_path):
         assert card.profile_completeness == 0.35
         assert card.recent_rounds_12m is None
         assert card.profile.assessments == []
-        assert all(not component.known and component.value == 0.5
+        assert all(not component.known and component.value == 0
                    for component in card.components if component.name != "co_investment")
         assert card.shared_round_count == 1 and len(record.result.candidates) == 1
+        assert record.result.scoring_version == "main-1fed306"
+        assert len(record.result.allocation) == 1
+        assert record.result.allocation[0].investor_id is None
+        assert record.result.allocation[0].amount_eur == record.result.remaining_allocation_eur
+        assert record.result.allocation[0].percentage == 100
+    asyncio.run(scenario())
+
+
+def test_main_flagged_cards_are_counted_for_review_and_not_allocated(tmp_path):
+    async def scenario():
+        graph = GraphSnapshot(rounds=[funding("shared", [entity("lead"), entity("candidate")])], complete=True)
+        context = founder()
+        context.startup.known_competitors = ["Synthetic company-a"]
+        _, record = await complete_run(Workflow(settings(tmp_path), SyntheticProvider(graph=graph)), context)
+        result = record.result
+        assert result.candidates[0].review_status == "flagged"
+        assert any(flag.kind == "conflict" for flag in result.candidates[0].flags)
+        assert result.counts["shortlisted"] == 0
+        assert result.counts["flagged"] == result.counts["returned"] == 1
+        assert result.combined_draft == ""
+        assert result.allocation[0].investor_id is None
+        assert result.allocation[0].amount_eur == result.remaining_allocation_eur
     asyncio.run(scenario())
 
 

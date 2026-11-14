@@ -35,7 +35,7 @@ async def execute(args):
                 choices[str(path)] = selected
             response = await client.post("/api/runs", json={
                 "resolution_id": resolution["id"], "lead_id": selected,
-                "profile_confirmed": True, "profile": request["profile"],
+                "profile_confirmed": True, "profile": resolution["profile"],
             })
             response.raise_for_status()
             status = response.json()
@@ -60,7 +60,8 @@ async def execute(args):
                 "founder_actionable_feedback": None, "result": result,
             }
             records.append(record)
-            print(f"  {result['state']}: {result['counts']['shortlisted']} cards, {result['processing_ms']:.1f} ms, {result['cala_calls']} calls, {result['cache_hits']} cache hits")
+            displayed = result['counts'].get('returned', len(result['candidates']))
+            print(f"  {result['state']}: {displayed} cards ({result['counts']['shortlisted']} eligible), {result['processing_ms']:.1f} ms, {result['cala_calls']} calls, {result['cache_hits']} cache hits")
     durations = sorted(record["processing_ms"] for record in records)
     report = {
         "source": "live HTTP workflow; no synthetic data adapter",

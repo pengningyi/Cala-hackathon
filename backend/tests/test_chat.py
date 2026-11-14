@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from app.chat import ResultChat, answer_result
 from app.main import create_app
-from app.models import ChatRequest, Consideration, GraphSnapshot, InvestmentObservation, InvestorProfile, Source, TicketCriterion
+from app.models import AllocationItem, ChatRequest, Consideration, GraphSnapshot, InvestmentObservation, InvestorFlag, InvestorProfile, Source, TicketCriterion
 from app.pipeline import RunRecord
 from app.scoring import months_before, score_candidate
 from test_workflow import SyntheticProvider, complete_run, entity, founder, funding, settings
@@ -112,6 +112,48 @@ def test_unknown_ticket_is_not_derived_from_funding_event_total(saved_result):
     assert "unknown" in response.message
     assert "total funding round is not the investor's check" in response.message
     assert "9,000,000" not in response.message
+
+
+def test_main_score_explanation_uses_zero_for_unknown_components(saved_result):
+    result = saved_result.model_copy(update={"scoring_version": "main-1fed306"})
+    response = answer_result(result, ChatRequest(message="Explain this score"))
+    assert "Unknown components contribute zero" in response.message
+    assert "neutral value of 0.5" not in response.message
+
+
+def test_allocation_percentages_are_estimates_of_the_open_amount(saved_result):
+    card = saved_result.candidates[0]
+    result = saved_result.model_copy(update={"allocation": [
+        AllocationItem(investor_id=card.investor.id, name=card.investor.name, amount_eur="200000",
+                       percentage=100 / 3, basis="Equal-share estimate"),
+        AllocationItem(name="Still open", amount_eur="400000", percentage=200 / 3, basis="Unallocated"),
+    ]})
+    response = answer_result(result, ChatRequest(message="Explain the investing percentage"))
+    assert "33.33% of the open allocation" in response.message
+    assert "EUR 400,000" in response.message
+    assert "equal-share heuristic" in response.message
+    assert "not a probability of investing" in response.message
+    assert response.candidate_ids == [card.investor.id]
+    assert response.model_used is False
+
+
+def test_empty_result_can_explain_the_unallocated_remainder(saved_result):
+    result = saved_result.model_copy(update={"candidates": [], "allocation": [
+        AllocationItem(name="Still open", amount_eur="600000", percentage=100, basis="No known ticket estimates"),
+    ]})
+    response = answer_result(result, ChatRequest(message="Why is the allocation still open?"))
+    assert "Still open: EUR 600,000 (100.00%" in response.message
+    assert response.candidate_ids == []
+
+
+def test_main_scoring_flags_are_explained_from_saved_evidence(saved_result):
+    card = saved_result.candidates[0].model_copy(update={"review_status": "flagged", "flags": [
+        InvestorFlag(kind="inactive", severity="grey", reason="No observed round in the last year", sources=[saved_result.candidates[0].sources[0]]),
+    ]})
+    result = saved_result.model_copy(update={"candidates": [card]})
+    response = answer_result(result, ChatRequest(message="Explain this flag"))
+    assert "No observed round in the last year" in response.message
+    assert response.citations == card.flags[0].sources
 
 
 def test_exclusion_question_never_changes_founder_status_or_shortlist(saved_result):

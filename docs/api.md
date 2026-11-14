@@ -47,6 +47,23 @@ Returns `Resolution`: `id`, the founder `profile`, Cala `lead_matches`, optional
 records include the Cala ID, name, type, country, description, website and sources
 where available. No company match is necessary for the manual startup flow.
 
+`branch-basic` also accepts the smaller main-branch form through the same typed
+contract. `startup.product_description`, `target_customer`, `problem_solved` and
+`country` may be empty or omitted. Stage accepts `pre_seed`, `seed`, `series_a`
+or `series_b`. Founder websites such as `cala.ai` are normalized to HTTPS.
+`excluded_investors` is an optional list of names the founder explicitly wants
+excluded. It is separate from current-round commitment/status records.
+
+When `lead_name` is blank, resolution searches the company and attempts bounded
+lead detection from an identified event with an explicit lead role. It returns
+`detected_lead` with the suggested entity, source company/event IDs, stage,
+event date/precision and sources. The resolved `profile.lead_name` is populated
+with that suggestion; submit the returned profile after confirmation. Ambiguous
+company or lead evidence requires manual refinement. Choosing a different
+startup entity invalidates a detected lead tied to the previous company.
+The default `round.lead_status` is `unconfirmed`; historical funding does not
+establish current-round commitment.
+
 Native Cala matches are optionally enriched after the basic search, within the
 same resolver deadline and request budget. Enrichment requests all properties
 advertised by that entity's introspection schema, plus available geography and
@@ -141,6 +158,21 @@ snapshot; labelled considerations; founder statuses; action and copyable draft.
 Source fields distinguish publication date, funding-event date and retrieval time.
 Scores prioritize introductions and are not participation probabilities.
 
+`branch-basic` cards additionally contain `review_status` (`short` or `flagged`),
+main's `flags`, an optional `estimated_ticket_eur` and its `ticket_estimate_basis`.
+Flagged cards remain visible for review; the combined introduction request and
+allocation use eligible cards only. `counts` distinguishes shortlisted, flagged
+and returned profiles. Explicit founder/mandate exclusions remain separate.
+
+`scoring_version: "main-1fed306"` identifies main's deterministic scoring rules;
+unknown signals contribute zero, with completeness reported independently.
+`allocation` contains `{investor_id, name, amount_eur, percentage, basis}` rows.
+Amounts are decimal strings, percentages refer to the open allocation, and a
+`Still open` row retains the remainder. Ticket estimates divide historical EUR
+round totals by observed investor counts and take their median. This is an
+equal-share heuristic, not a measured individual check; foreign-currency totals
+are not silently treated as EUR.
+
 The Cala call counter includes data-operation attempts and retries. MCP session
 initialization and cached `tools/list` schema discovery are protocol overhead.
 In the native adapter every introspection, entity retrieval and event-join data
@@ -151,7 +183,8 @@ issuer profiles do not require invented company identities.
 The run uses at most four concurrent operations, ten preliminary candidates and
 five eligible detailed profiles; explicit exclusions may trigger bounded backfill.
 The 90-second deadline begins at confirmation; the final ten seconds are reserved
-for assessments and result assembly. Unknown semantic fit uses the neutral score.
+for assessments and result assembly. Main's numerical score does not use semantic
+ratings; missing numerical inputs contribute zero.
 
 ## Result conversation
 
@@ -176,7 +209,8 @@ investor and saved evidence. Unsupported questions receive scope guidance.
 
 Supported topics include priorities, comparison, shared-event graph paths, saved
 introduction/follow-up requests, participation criteria, unknowns, considerations
-and exclusions. Answers preserve the frozen ranking and never change founder
+and exclusions, plus main's flags and estimated allocation percentages. Answers
+preserve the recorded ranking and never change founder
 statuses or run new discovery. Sources retain their dates. Pending results return
 HTTP 409, missing/expired runs 404, invalid selection 400, and invalid input 422.
 
@@ -188,5 +222,5 @@ capacity 429; unconfigured/unavailable Cala 503; invalid upstream responses 502;
 resolution timeout 504. Invalid Cala configuration never silently returns demo data.
 
 Runs expire after the configured retention interval. This MVP has no accounts,
-CRM integration, email sending or contact enrichment. The future Next.js app will
-consume this API; all ranking remains in the backend.
+CRM integration, email sending or contact enrichment. The Next.js app consumes
+this API; all ranking remains in the backend.

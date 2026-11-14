@@ -5,15 +5,16 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 from .config import Settings
 from .models import (
-    Entity, FounderInput, FundingRound, GraphSnapshot, InvestorProfile, Resolution,
+    DetectedLead, Entity, FounderInput, FundingRound, GraphSnapshot, InvestorProfile, Resolution,
     ResolveRequest, RunResult, RunStatus, StartRunRequest,
 )
 from .runtime import BudgetExceeded, ResponseCache, Retrieval, Trace, utcnow
 from .scoring import (
-    combined_draft, deduplicate_rounds, exclusion_for, months_before, normalize_stage,
+    build_allocation, combined_draft, deduplicate_rounds, exclusion_for, months_before, normalize_stage, normalized_name,
     rank_candidates, score_candidate,
 )
 
@@ -69,23 +70,47 @@ class Workflow:
             raise WorkflowError("capacity", "Resolution capacity reached; retry after older resolutions expire", 429)
         started, now = time.monotonic(), utcnow()
         leads, startups, notices = [], [], []
+        profile = request.profile.model_copy(deep=True)
+        detected_lead = None
         if request.profile.round.remaining_eur > 0:
             retrieval = Retrieval(self.provider, self.cache, self.settings, Trace(), semaphore=self.semaphore)
             # Resolution latency is separate from confirmed-run processing.
             retrieval.stop_at = started + self.settings.cala_request_timeout_seconds
-            leads = await retrieval.call("search_entities", {"query": request.profile.lead_name, "kind": "investor"}, list[Entity], "resolver")
-            if request.lookup_startup:
+            if profile.lead_name:
+                leads = await retrieval.call("search_entities", {"query": profile.lead_name, "kind": "investor"}, list[Entity], "resolver")
+            if request.lookup_startup or not profile.lead_name:
                 try:
-                    startups = await retrieval.call("search_entities", {"query": request.profile.startup.company_name, "kind": "company"}, list[Entity], "resolver")
+                    startups = await retrieval.call("search_entities", {"query": profile.startup.company_name, "kind": "company"}, list[Entity], "resolver")
                 except Exception:
                     notices.append("Optional startup lookup unavailable; confirm the manual startup profile.")
+            if not profile.lead_name:
+                startup = _startup_for_detection(profile, startups)
+                if startup is None:
+                    notices.append("A unique company match is needed to detect a lead. Enter a lead investor or refine the company name and website.")
+                elif not callable(getattr(self.provider, "detect_lead", None)):
+                    notices.append("Lead auto-detection is unavailable for this Cala adapter. Enter the lead investor's name.")
+                else:
+                    try:
+                        async with asyncio.timeout(max(0, retrieval.remaining() - 0.05)):
+                            detected_lead = await retrieval.call("detect_lead", {"company_id": startup.id},
+                                                                DetectedLead | None, "resolver_lead")
+                        if detected_lead and detected_lead.company_id == startup.id:
+                            leads = [detected_lead.lead]
+                            profile.lead_name = detected_lead.lead.name
+                            notices.append("Lead suggested from an identified Cala funding event. Confirm the lead and company before starting the search.")
+                        else:
+                            detected_lead = None
+                            notices.append("No unique, explicitly identified lead was found in the retrieved company funding events. Enter your lead investor.")
+                    except Exception:
+                        detected_lead = None
+                        notices.append("Lead detection could not finish within the lookup limits. Your company matches remain available; enter your lead investor.")
             if callable(getattr(self.provider, "entity_metadata", None)) and (leads or startups):
                 leads, startups = await self._resolve_metadata(retrieval, leads, startups, notices)
             if not leads:
                 notices.append("No Cala lead match found. Refine the lead name before starting a run.")
         else:
             notices.append("No open allocation. No Cala search was performed.")
-        resolution = Resolution(id=uuid.uuid4().hex, profile=request.profile.model_copy(deep=True),
+        resolution = Resolution(id=uuid.uuid4().hex, profile=profile, detected_lead=detected_lead,
                                 lead_matches=leads, startup_matches=startups,
                                 created_at=now, expires_at=now + timedelta(seconds=self.settings.retention_seconds),
                                 resolver_ms=round((time.monotonic() - started) * 1000, 2),
@@ -162,6 +187,9 @@ class Workflow:
             raise WorkflowError("lead_changed", "Resolve the updated lead name before confirmation")
         if request.profile.startup.cala_entity_id and request.profile.startup.cala_entity_id not in {e.id for e in resolution.startup_matches}:
             raise WorkflowError("invalid_startup_selection", "Select a startup ID offered by this resolution or use a manual profile")
+        if (resolution.detected_lead and request.profile.startup.cala_entity_id
+                and request.profile.startup.cala_entity_id != resolution.detected_lead.company_id):
+            raise WorkflowError("detected_lead_company_changed", "This suggested lead belongs to a different company match. Resolve the corrected company or enter its lead manually.")
         lead = next((x for x in resolution.lead_matches if x.id == request.lead_id), None)
         if request.profile.round.remaining_eur > 0 and lead is None:
             raise WorkflowError("invalid_lead_selection", "Select a lead ID offered by this resolution")
@@ -291,7 +319,7 @@ class Workflow:
                         notices.append("Drafting deadline reached; using sourced introduction templates.")
                 elif profiles:
                     notices.append("Semantic assessments disabled; sector and overlap remain unknown unless supplied in the snapshot.")
-                trace.emit("scoring", "Applying frozen PRD weights, status rules and deterministic ranking")
+                trace.emit("scoring", "Applying main-branch scoring, flags and deterministic ranking")
                 for profile in profiles:
                     cards.append(score_candidate(profile, candidate_rounds[profile.investor.id], founder, lead, as_of))
                 cards = rank_candidates(cards)[:config.profile_limit]
@@ -315,12 +343,17 @@ class Workflow:
                               confirmed_at=run.confirmed_at, finished_at=finished,
                               remaining_allocation_eur=founder.round.remaining_eur, lookback_months=config.lookback_months,
                               candidates=cards, exclusions=excluded, incomplete=incomplete,
-                              counts={"discovered": discovered, "profiled": profiled_count, "shortlisted": len(cards),
+                              counts={"discovered": discovered, "profiled": profiled_count,
+                                      "shortlisted": sum(card.review_status == "short" for card in cards),
+                                      "flagged": sum(card.review_status == "flagged" for card in cards),
+                                      "returned": len(cards),
                                       "excluded": len(excluded), "incomplete": len(incomplete)},
                               notices=list(dict.fromkeys(notices)), combined_draft=combined_draft(cards, founder, lead) if cards else "",
                               processing_ms=round((time.monotonic() - run.started) * 1000, 2),
                               cala_calls=retrieval.calls, cache_hits=retrieval.cache_hits,
-                              retrieval_timestamps=sorted(set(retrieval.timestamps)), error=error)
+                              retrieval_timestamps=sorted(set(retrieval.timestamps)), error=error,
+                              scoring_version="main-1fed306",
+                              allocation=build_allocation(cards, founder.round.remaining_eur))
         trace.emit("complete", f"Run finished: {state}", type="complete", count=len(cards))
 
 
@@ -329,3 +362,32 @@ def _qualified_rounds(rounds, lead_id, start_date, end_date):
     return [funding for funding in deduplicate_rounds(rounds)
             if funding.event_date and start_date <= funding.event_date <= end_date
             and funding.sources and any(p.investor.id == lead_id for p in funding.participants)]
+
+
+def _startup_for_detection(profile: FounderInput, matches: list[Entity]) -> Entity | None:
+    """Use an exact name/alias or explicit website, never the first fuzzy match."""
+    if profile.startup.cala_entity_id:
+        return next((item for item in matches if item.id == profile.startup.cala_entity_id), None)
+
+    def hostname(value):
+        if not value:
+            return None
+        text = str(value)
+        parsed = urlsplit(text if "://" in text else "https://" + text)
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        return host or None
+
+    name = normalized_name(profile.startup.company_name)
+    exact = [item for item in matches if name in {normalized_name(item.name), *(normalized_name(alias) for alias in item.aliases)}]
+    requested_host = hostname(profile.startup.website)
+    if requested_host:
+        website_matches = [item for item in matches if hostname(item.website) == requested_host]
+        exact_website = [item for item in exact if item in website_matches]
+        if len(exact_website) == 1:
+            return exact_website[0]
+        if len(website_matches) == 1 and not exact:
+            return website_matches[0]
+        if len(exact) == 1 and (not exact[0].website or hostname(exact[0].website) == requested_host):
+            return exact[0]
+        return None
+    return exact[0] if len(exact) == 1 else None

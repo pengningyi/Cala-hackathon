@@ -44,9 +44,25 @@ Native APIs using another protocol need a `SemanticProvider` adapter. No specifi
 model is imposed. `MODEL_PROVIDER=disabled` keeps semantic assessments unknown.
 The model never sets scores, weights, entity identities or exclusion rules.
 The current writer uses sourced templates for every completed card. Semantic
-sector/overlap assessment uses the selected model when it completes in budget.
+overlap assessment uses the selected model when it completes in budget; main's
+sector score uses its deterministic keyword rule rather than the model's rating.
 The local CLI structured-output smoke test passed with network access. Verify
 login, network access and model latency on the machine running the service.
+
+On `branch-basic`, the basic form matches main: company, website, sector, optional
+HQ country, Pre-seed/Seed/Series A/Series B, target, commitments, optional lead,
+investors already in and known competitors. A blank lead triggers bounded
+auto-detection from an exact company funding event with a sourced explicit lead
+role. The founder still confirms the offered IDs. Historical lead detection does
+not assert current commitment; the default status is `unconfirmed`.
+
+The server-side engine in `app/main_scoring.py` is ported from main at `1fed306`.
+Unknown signals contribute zero. `app/scoring.py` adapts sourced typed profiles,
+preserves founder exclusions and drafts, and labels main's flags as review
+status. `RunResult.scoring_version` is `main-1fed306`. Allocation percentages use
+main's greedy method with explicitly labelled equal-share ticket estimates; they
+are neither actual investor checks nor probabilities. Only known EUR totals
+enter those estimates. See [integration details](../docs/branch-basic-integration.md).
 
 Run verification from this directory:
 

@@ -308,6 +308,48 @@
   },
   "components": {
     "schemas": {
+      "AllocationItem": {
+        "properties": {
+          "investor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investor Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "amount_eur": {
+            "type": "string",
+            "title": "Amount Eur"
+          },
+          "percentage": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Percentage"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "amount_eur",
+          "percentage",
+          "basis"
+        ],
+        "title": "AllocationItem"
+      },
       "Assessment": {
         "properties": {
           "company_id": {
@@ -460,6 +502,44 @@
           "draft": {
             "type": "string",
             "title": "Draft"
+          },
+          "review_status": {
+            "type": "string",
+            "enum": [
+              "short",
+              "flagged"
+            ],
+            "title": "Review Status",
+            "default": "short"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/InvestorFlag"
+            },
+            "type": "array",
+            "title": "Flags"
+          },
+          "estimated_ticket_eur": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Ticket Eur"
+          },
+          "ticket_estimate_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Estimate Basis"
           }
         },
         "additionalProperties": false,
@@ -617,6 +697,82 @@
           "basis"
         ],
         "title": "Consideration"
+      },
+      "DetectedLead": {
+        "properties": {
+          "lead": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "event_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date"
+          },
+          "event_date_precision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date Precision"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lead"
+        ],
+        "title": "DetectedLead"
       },
       "Entity": {
         "properties": {
@@ -885,8 +1041,16 @@
           "lead_name": {
             "type": "string",
             "maxLength": 200,
-            "minLength": 1,
-            "title": "Lead Name"
+            "title": "Lead Name",
+            "default": ""
+          },
+          "excluded_investors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Excluded Investors"
           },
           "investor_statuses": {
             "items": {
@@ -904,8 +1068,7 @@
         "type": "object",
         "required": [
           "startup",
-          "round",
-          "lead_name"
+          "round"
         ],
         "title": "FounderInput"
       },
@@ -932,8 +1095,16 @@
           "lead_name": {
             "type": "string",
             "maxLength": 200,
-            "minLength": 1,
-            "title": "Lead Name"
+            "title": "Lead Name",
+            "default": ""
+          },
+          "excluded_investors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Excluded Investors"
           },
           "investor_statuses": {
             "items": {
@@ -951,8 +1122,7 @@
         "type": "object",
         "required": [
           "startup",
-          "round",
-          "lead_name"
+          "round"
         ],
         "title": "FounderInput"
       },
@@ -1136,6 +1306,53 @@
         ],
         "title": "InvestmentObservation",
         "description": "An identified investment event whose issuer profile may not be retrieved."
+      },
+      "InvestorFlag": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "red",
+              "grey",
+              "amber"
+            ],
+            "title": "Severity"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "severity",
+          "reason"
+        ],
+        "title": "InvestorFlag"
       },
       "InvestorProfile": {
         "properties": {
@@ -1339,6 +1556,16 @@
             },
             "type": "array",
             "title": "Notices"
+          },
+          "detected_lead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DetectedLead"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -1376,8 +1603,10 @@
           "stage": {
             "type": "string",
             "enum": [
+              "pre_seed",
               "seed",
-              "series_a"
+              "series_a",
+              "series_b"
             ],
             "title": "Stage"
           },
@@ -1423,9 +1652,11 @@
             "enum": [
               "signed",
               "firm_verbal",
-              "conditional"
+              "conditional",
+              "unconfirmed"
             ],
-            "title": "Lead Status"
+            "title": "Lead Status",
+            "default": "unconfirmed"
           },
           "lead_ticket_eur": {
             "anyOf": [
@@ -1448,8 +1679,7 @@
         "required": [
           "stage",
           "target_eur",
-          "firm_commitments_eur",
-          "lead_status"
+          "firm_commitments_eur"
         ],
         "title": "RoundInput"
       },
@@ -1458,8 +1688,10 @@
           "stage": {
             "type": "string",
             "enum": [
+              "pre_seed",
               "seed",
-              "series_a"
+              "series_a",
+              "series_b"
             ],
             "title": "Stage"
           },
@@ -1481,9 +1713,11 @@
             "enum": [
               "signed",
               "firm_verbal",
-              "conditional"
+              "conditional",
+              "unconfirmed"
             ],
-            "title": "Lead Status"
+            "title": "Lead Status",
+            "default": "unconfirmed"
           },
           "lead_ticket_eur": {
             "anyOf": [
@@ -1502,8 +1736,7 @@
         "required": [
           "stage",
           "target_eur",
-          "firm_commitments_eur",
-          "lead_status"
+          "firm_commitments_eur"
         ],
         "title": "RoundInput"
       },
@@ -1617,7 +1850,14 @@
           "scoring_version": {
             "type": "string",
             "title": "Scoring Version",
-            "default": "prd-v1"
+            "default": "main-1fed306"
+          },
+          "allocation": {
+            "items": {
+              "$ref": "#/components/schemas/AllocationItem"
+            },
+            "type": "array",
+            "title": "Allocation"
           },
           "error": {
             "anyOf": [
@@ -1880,8 +2120,8 @@
           "product_description": {
             "type": "string",
             "maxLength": 4000,
-            "minLength": 1,
-            "title": "Product Description"
+            "title": "Product Description",
+            "default": ""
           },
           "sector": {
             "type": "string",
@@ -1892,20 +2132,20 @@
           "target_customer": {
             "type": "string",
             "maxLength": 2000,
-            "minLength": 1,
-            "title": "Target Customer"
+            "title": "Target Customer",
+            "default": ""
           },
           "problem_solved": {
             "type": "string",
             "maxLength": 2000,
-            "minLength": 1,
-            "title": "Problem Solved"
+            "title": "Problem Solved",
+            "default": ""
           },
           "country": {
             "type": "string",
             "maxLength": 100,
-            "minLength": 2,
-            "title": "Country"
+            "title": "Country",
+            "default": ""
           },
           "known_competitors": {
             "items": {
@@ -1920,11 +2160,7 @@
         "type": "object",
         "required": [
           "company_name",
-          "product_description",
-          "sector",
-          "target_customer",
-          "problem_solved",
-          "country"
+          "sector"
         ],
         "title": "Startup"
       },

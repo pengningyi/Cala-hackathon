@@ -1,28 +1,29 @@
-"""Frozen PRD-v1 ranking and policy rules over Cala profile snapshots.
+"""Main-branch scoring over branch-one's typed Cala evidence and introduction drafts.
 
-No public facts or investor check sizes are inferred here. Semantic assessments
-are stored on the snapshot and remain explicitly labelled as LLM assessments.
+The numerical engine is ported from main commit 1fed306. Ticket estimates are
+explicit equal-share heuristics, kept separate from factual investor criteria.
 """
 from __future__ import annotations
 
 import calendar
-import math
 import re
 import unicodedata
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+from statistics import median
 
+from . import main_scoring
 from .entity_metadata import country_name
 from .models import (
-    CandidateCard, Consideration, Entity, Exclusion, FounderInput, FundingRound,
-    InvestmentObservation, InvestorProfile, InvestorStatus, ScoreComponent, Source,
+    AllocationItem, CandidateCard, Consideration, Entity, Exclusion, FounderInput, FundingRound,
+    InvestmentObservation, InvestorFlag, InvestorProfile, InvestorStatus, ScoreComponent, Source,
 )
 
 
-WEIGHTS = {"co_investment": 35, "recent_activity": 20, "stage_fit": 15,
-           "sector_fit": 15, "non_lead_participation": 10, "geography_fit": 5}
-USUALLY_LEADS_THRESHOLD = 0.8
-LIMITED_STAGE_THRESHOLD = 0.1
+WEIGHTS = {name: main_scoring.WEIGHTS[key] for name, key in {
+    "co_investment": "coinv", "recent_activity": "activity", "stage_fit": "stage",
+    "sector_fit": "sector", "non_lead_participation": "follow", "geography_fit": "geo",
+}.items()}
 
 
 def normalized_name(value: str) -> str:
@@ -44,15 +45,6 @@ _COUNTRY_ALIASES = {
     "ca": "canada", "au": "australia", "nz": "new zealand", "il": "israel",
     "sg": "singapore", "in": "india", "jp": "japan", "cn": "china",
 }
-_REGIONS = {
-    "europe": set("albania|andorra|austria|belarus|belgium|bosnia and herzegovina|bulgaria|croatia|cyprus|czechia|denmark|estonia|finland|france|germany|greece|hungary|iceland|ireland|italy|kosovo|latvia|liechtenstein|lithuania|luxembourg|malta|moldova|monaco|montenegro|netherlands|north macedonia|norway|poland|portugal|romania|san marino|serbia|slovakia|slovenia|spain|sweden|switzerland|ukraine|united kingdom|vatican city".split("|")),
-    "north_america": {"united states", "canada", "mexico"},
-    "oceania": {"australia", "new zealand"},
-    "asia": set("china|india|japan|singapore|south korea|taiwan|indonesia|malaysia|thailand|vietnam|philippines|pakistan|bangladesh".split("|")),
-    "middle_east": {"israel", "united arab emirates", "saudi arabia", "qatar", "bahrain", "jordan", "turkey"},
-    "south_america": {"brazil", "argentina", "chile", "colombia", "peru", "uruguay"},
-    "africa": {"south africa", "nigeria", "kenya", "egypt", "ghana", "morocco", "tunisia", "rwanda"},
-}
 
 
 def normalize_country(value: str | None) -> str:
@@ -62,14 +54,11 @@ def normalize_country(value: str | None) -> str:
     return normalized_name(canonical) if canonical else norm
 
 
-_NORMALIZED_REGIONS = {region: {normalize_country(country) for country in countries}
-                       for region, countries in _REGIONS.items()}
 
 
 def normalize_stage(value: str | None) -> str:
-    norm = normalized_name(value or "")
-    return {"series a": "series_a", "series_a": "series_a", "a": "series_a",
-            "seed round": "seed", "seed": "seed"}.get(norm, norm)
+    key = main_scoring.stage_key(value)
+    return key.replace("-", "_")
 
 
 def months_before(day: date, months: int) -> date:
@@ -78,8 +67,6 @@ def months_before(day: date, months: int) -> date:
     return date(year, month + 1, min(day.day, calendar.monthrange(year, month + 1)[1]))
 
 
-def _region(country: str) -> str | None:
-    return next((region for region, countries in _NORMALIZED_REGIONS.items() if country in countries), None)
 
 
 def unique_sources(sources: list[Source]) -> list[Source]:
@@ -129,6 +116,9 @@ def exclusion_for(investor: Entity, founder: FounderInput, lead: Entity,
     ):
         if status in statuses:
             return exclusion(status.value, reason)
+    excluded_names = {normalized_name(value) for value in getattr(founder, "excluded_investors", [])}
+    if _entity_names(investor) & excluded_names:
+        return exclusion("already_in_excluded", "Founder listed this investor under 'Investors already in (excluded)'.")
     if investor.id == lead.id:
         return exclusion("primary_lead", "The primary lead is not a separate co-investor.", lead.sources)
     recognized_alias = (normalized_name(investor.name) in {normalized_name(n) for n in lead.aliases}
@@ -161,7 +151,7 @@ def exclusion_for(investor: Entity, founder: FounderInput, lead: Entity,
         for mandate in profile.mandates:
             if not (mandate.currently_applicable and mandate.sources):
                 continue
-            if (mandate.allowed_countries and normalize_country(founder.startup.country) not in {
+            if (mandate.allowed_countries and founder.startup.country and normalize_country(founder.startup.country) not in {
                     normalize_country(country) for country in mandate.allowed_countries}):
                 return exclusion("published_geography_mandate", "Applicable published mandate does not include the startup's country.",
                                  mandate.sources)
@@ -251,8 +241,8 @@ def _behavior_observations(profile: InvestorProfile, shared: list[FundingRound])
 def _component(name: str, value: float | None, explanation: str, sources: list[Source],
                numerator: float | None = None, denominator: float | None = None) -> ScoreComponent:
     known = value is not None and bool(sources)
-    return ScoreComponent(name=name, weight=WEIGHTS[name], value=value if known else 0.5,
-                          known=known, explanation=explanation if known else "Unknown; neutral scoring value 0.5.",
+    return ScoreComponent(name=name, weight=WEIGHTS[name], value=value if value is not None else 0,
+                          known=known, explanation=explanation if known else "Unknown; contributes zero under main-branch scoring.",
                           numerator=numerator if known else None, denominator=denominator if known else None,
                           sources=unique_sources(sources) if known else [])
 
@@ -276,7 +266,8 @@ def _shared_phrase(deals: list[FundingRound], limit: int = 2) -> str:
 
 
 def _draft(card: CandidateCard, founder: FounderInput, lead: Entity) -> str:
-    opening = ("While your lead commitment is provisional, " if founder.round.lead_status == "conditional" else "")
+    opening = ("While your lead commitment is provisional, " if founder.round.lead_status == "conditional"
+               else "Before a lead commitment is confirmed, " if founder.round.lead_status == "unconfirmed" else "")
     if card.action == "follow_up" and InvestorStatus.EXISTING_SHAREHOLDER in card.statuses:
         request = f"could you advise on a follow-on request to our existing shareholder {card.investor.name}"
     elif card.action == "follow_up":
@@ -287,8 +278,11 @@ def _draft(card: CandidateCard, founder: FounderInput, lead: Entity) -> str:
         request = request[0].upper() + request[1:]
     shared = _shared_phrase(card.shared_deals)
     context = (f"We are raising a {founder.round.stage.replace('_', ' ')} round for {founder.startup.company_name}, "
-               f"with {_eur(founder.round.remaining_eur)} remaining after firm commitments. "
-               f"Our product: {founder.startup.product_description} ")
+               f"with {_eur(founder.round.remaining_eur)} remaining after firm commitments. ")
+    if founder.startup.product_description:
+        context += f"Our product: {founder.startup.product_description} "
+    elif founder.startup.sector:
+        context += f"Our sector: {founder.startup.sector}. "
     if card.action == "follow_up":
         ending = "Could you advise on the appropriate next step and whether your support would be helpful?"
     else:
@@ -298,109 +292,132 @@ def _draft(card: CandidateCard, founder: FounderInput, lead: Entity) -> str:
             f"Cala shows you participated together in {shared}. {context}{ending}{signature}")
 
 
+def _sector_fact(funding: FundingRound) -> tuple[str | None, list[Source]]:
+    if funding.sector:
+        return funding.sector, funding.sources
+    for field in funding.company.metadata:
+        if field.name not in ("sector", "industry", "industries", "category", "vertical") or not field.sources:
+            continue
+        values = field.value if isinstance(field.value, list) else [field.value]
+        labels = [value for value in values if isinstance(value, str) and value.strip()]
+        if labels:
+            return ", ".join(labels), field.sources
+    return None, []
+
+
 def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
                     founder: FounderInput, lead: Entity, as_of: date) -> CandidateCard:
+    """Use main's numerical rules while retaining branch-one's exact-event evidence."""
     investor = profile.investor
     shared = []
     for item in _dedup_rounds(shared_rounds):
-        participants = {p.investor.id for p in item.participants}
+        participants = {person.investor.id for person in item.participants}
         if (investor.id in participants and lead.id in participants and item.sources
                 and item.event_date is not None and item.event_date <= as_of):
             shared.append(item)
-    shared.sort(key=lambda r: (-(r.event_date or date.min).toordinal(), r.id))
+    shared.sort(key=lambda item: (-item.event_date.toordinal(), item.id))
     if not shared:
         raise ValueError("Candidate must have a sourced, dated funding event shared with the confirmed lead")
-    latest_by_company: dict[str, FundingRound] = {}
-    for item in shared:
-        latest_by_company.setdefault(item.company.id, item)
-    recency = sum(2 ** (-max(0, (as_of - item.event_date).days / (365.2425 / 12)) / 24)
-                  for item in latest_by_company.values())
-    connection = _component("co_investment", min(recency, 3) / 3,
-                            f"{len(shared)} shared rounds across {len(latest_by_company)} distinct companies; latest round per company, 24-month half-life.",
-                            _sources(shared), min(recency, 3), 3)
 
     known_events = [item for item in _dedup_rounds(profile.rounds + shared)
                     if item.event_date is not None and item.event_date <= as_of and item.sources
-                    and any(p.investor.id == investor.id for p in item.participants)]
+                    and any(person.investor.id == investor.id for person in item.participants)]
     observed = [item for item in known_events if months_before(as_of, 24) <= item.event_date]
     known_behavior = [item for item in _behavior_observations(profile, shared)
                       if item.event_date is not None and item.event_date <= as_of]
     observed_behavior = [item for item in known_behavior if item.event_date >= months_before(as_of, 24)]
-    recent = [item for item in observed_behavior if item.event_date >= months_before(as_of, 12)]
-    activity_known = bool(observed_behavior) or profile.activity_window_complete
-    activity_sources = _sources(observed_behavior) or profile.sources
-    activity = _component("recent_activity", min(len(recent) / 4, 1) if activity_known else None,
-                          f"{len(recent)} observed rounds in the last 12 months; capped at four.", activity_sources,
-                          len(recent), 4)
-    staged = [item for item in observed_behavior if item.stage]
-    matching = [item for item in staged if normalize_stage(item.stage) == normalize_stage(founder.round.stage)]
-    stage = _component("stage_fit", len(matching) / len(staged) if staged else None,
-                       f"{len(matching)}/{len(staged)} known-stage rounds match {founder.round.stage} in the last 24 months.",
-                       _sources(staged), len(matching), len(staged))
+    events_by_id = {item.id: item for item in observed}
+    rows = []
+    sector_sources: list[Source] = []
+    geography_sources: list[Source] = []
+    ticket_values: list[Decimal] = []
+    for observation in observed_behavior:
+        funding = events_by_id.get(observation.id)
+        sector, sector_evidence = _sector_fact(funding) if funding else (None, [])
+        country, country_evidence = None, []
+        if funding:
+            country = funding.company_country or funding.company.country
+            country_evidence = funding.sources if funding.company_country else _entity_fact_sources(funding.company, "country")
+            if not country_evidence:
+                country = None
+        investor_ids = sorted({person.investor.id for person in funding.participants}) if funding else []
+        amount = funding.total_amount_eur if funding and investor_ids else None
+        if amount is not None and amount > 0:
+            ticket_values.append(amount / Decimal(len(investor_ids)))
+        sector_sources.extend(sector_evidence)
+        geography_sources.extend(country_evidence)
+        rows.append({"company": funding.company.name if funding else "", "date": observation.event_date.isoformat(),
+                     "stage": observation.stage, "sector": sector, "country": normalize_country(country) if country else "",
+                     "lead": observation.is_lead, "amount": float(amount) if amount is not None else None,
+                     "investors": investor_ids})
 
-    # One frozen assessment per distinct observed company, never a count of round references.
-    company_ids = {item.company.id for item in observed}
-    assessments = {}
-    for assessment in sorted(profile.assessments, key=lambda a: a.model_dump_json()):
-        if assessment.company_id in company_ids and assessment.sources:
-            assessments.setdefault(assessment.company_id, assessment)
-    evaluated = [a for a in assessments.values() if a.sector_fit != "unknown"]
-    sector_sum = sum({"same": 1, "adjacent": 0.5, "unrelated": 0}[a.sector_fit] for a in evaluated)
-    sector = _component("sector_fit", sector_sum / len(evaluated) if evaluated else None,
-                        f"LLM assessment: weighted fit total {sector_sum:g}/{len(evaluated)} evaluated portfolio companies.",
-                        [s for a in evaluated for s in a.sources], sector_sum, len(evaluated))
+    sector_terms = [term.strip() for term in re.split(r"[,/;]| and ", founder.startup.sector.lower())
+                    + [founder.startup.sector.lower()] if len(term.strip()) > 2]
+    payload = {"id": investor.id, "name": investor.name, "origin": "lead-graph", "rounds": rows,
+               "shared": [{"company": item.company.name, "stage": item.stage, "date": item.event_date.isoformat()}
+                          for item in shared]}
+    context = {"stage": founder.round.stage, "sector_terms": sector_terms,
+               "country": normalize_country(founder.startup.country), "open_eur": float(founder.round.remaining_eur),
+               "competitors": founder.startup.known_competitors}
+    main_scoring.score_candidate(payload, context, as_of=as_of)
+    signals = payload["signals"]
+    n = len(observed_behavior)
+    recent = [item for item in observed_behavior if (as_of - item.event_date).days <= 365]
+    staged = [item for item in observed_behavior if item.stage]
+    matching = [item for item in observed_behavior if normalize_stage(item.stage) == normalize_stage(founder.round.stage)]
     known_roles = [item for item in observed_behavior if item.is_lead is not None]
     non_lead = sum(not item.is_lead for item in known_roles)
-    role = _component("non_lead_participation", non_lead / len(known_roles) if known_roles else None,
-                      f"{non_lead}/{len(known_roles)} participations with known lead status were explicitly non-lead.",
-                      _sources(known_roles), non_lead, len(known_roles))
-
-    geographies = []
-    geography_sources = []
-    for item in observed:
-        country = item.company_country or item.company.country
-        evidence = item.sources if item.company_country else _entity_fact_sources(item.company, "country")
-        if country and evidence:
-            geographies.append((item, normalize_country(country)))
-            geography_sources.extend(evidence)
-    founder_country = normalize_country(founder.startup.country)
-    founder_region = _region(founder_country)
-    if not geographies:
-        geo_value = None
-    elif any(country == founder_country for _, country in geographies):
-        geo_value = 1.0
-    elif founder_region and any(_region(country) == founder_region for _, country in geographies):
-        geo_value = 0.5
-    else:
-        geo_value = 0.0
-    geo = _component("geography_fit", geo_value,
-                     "Prior country investment = 1; same predefined region = 0.5; other observed countries = 0.",
-                     geography_sources)
-    components = [connection, activity, stage, sector, role, geo]
+    recent_shared = sum(item.event_date >= date(as_of.year - 2, as_of.month, 1) for item in shared)
+    activity_sources = _sources(observed_behavior) or (profile.sources if profile.activity_window_complete else [])
+    components = [
+        _component("co_investment", signals["coinv"]["v"], signals["coinv"]["label"], _sources(shared),
+                   min(len(shared) + .5 * recent_shared, 3), 3),
+        _component("recent_activity", signals["activity"]["v"], signals["activity"]["label"], activity_sources, len(recent), 4),
+        _component("stage_fit", signals["stage"]["v"], signals["stage"]["label"], _sources(staged), len(matching), n),
+        _component("sector_fit", signals["sector"]["v"], signals["sector"]["label"], sector_sources,
+                   sum(any(term in str(row["sector"]).lower() for term in sector_terms) for row in rows), n),
+        _component("non_lead_participation", signals["follow"]["v"], signals["follow"]["label"], _sources(known_roles),
+                   non_lead, len(known_roles)),
+        _component("geography_fit", signals.get("geo", {}).get("v"), signals.get("geo", {}).get("label", "geography unknown"),
+                   geography_sources),
+    ]
+    estimated_ticket = (median(ticket_values).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        if ticket_values else None)
+    ticket_basis = ("Equal-share heuristic: EUR funding-round total divided by observed investor count; "
+                    "actual investor checks are unknown.") if estimated_ticket is not None else None
+    flags = []
+    for flag in payload["flags"]:
+        if flag["kind"] == "conflict":
+            evidence = unique_sources([source for item in observed if item.company.name == flag.get("company") for source in item.sources])
+        elif flag["kind"] == "ticket":
+            evidence = _sources([item for item in observed if item.total_amount_eur is not None])
+        else:
+            evidence = _sources(observed_behavior)
+        reason = flag["reason"]
+        if flag["kind"] == "ticket":
+            reason = (f"The equal-share estimate exceeds the open allocation before display rounding "
+                      f"(rounded estimate {_eur(estimated_ticket)}; open {_eur(founder.round.remaining_eur)}). "
+                      "Actual investor checks are unknown.")
+        flags.append(InvestorFlag(kind=flag["kind"], severity=flag["severity"], reason=reason,
+                                  company=flag.get("company"), sources=evidence))
     considerations: list[Consideration] = []
 
-    def add(code: str, text: str, sources: list[Source], basis: str = "Cala fact"):
-        if sources or basis == "Founder supplied":
-            considerations.append(Consideration(code=code, text=text, basis=basis, sources=unique_sources(sources)))
+    def add(code: str, content: str, evidence: list[Source], basis: str = "Cala fact"):
+        if evidence or basis == "Founder supplied":
+            considerations.append(Consideration(code=code, text=content, basis=basis, sources=unique_sources(evidence)))
 
-    if activity.known and not recent:
-        add("low_recent_activity", "No recent investment observed; confirm current appetite.", activity.sources)
-    led = len(known_roles) - non_lead
-    if known_roles and led / len(known_roles) > USUALLY_LEADS_THRESHOLD:
-        add("usually_leads", f"Led {led}/{len(known_roles)} participations with known roles; ask whether participation alongside this lead is possible.", role.sources)
-    if staged and len(matching) / len(staged) < LIMITED_STAGE_THRESHOLD:
-        add("limited_stage_history", f"Only {len(matching)}/{len(staged)} known-stage rounds match; ask about the current mandate.", stage.sources)
+    codes = {"inactive": "low_recent_activity", "lead-only": "usually_leads", "stage": "limited_stage_history"}
+    for flag in flags:
+        if flag.kind in codes:
+            add(codes[flag.kind], flag.reason, flag.sources)
+        elif flag.kind == "conflict":
+            add("founder_competitor", flag.reason + ". Competitor identity supplied by the founder.", flag.sources, "Founder supplied")
     companies = {item.company.id: item.company for item in observed}
-    for assessment in assessments.values():
-        if assessment.company_id == founder.startup.cala_entity_id:
-            continue
-        if assessment.overlap in ("adjacent_business", "possible_overlap", "direct_substitute"):
-            add("portfolio_overlap", f"LLM assessment: {companies[assessment.company_id].name} — "
+    for assessment in profile.assessments:
+        if (assessment.company_id in companies and assessment.company_id != founder.startup.cala_entity_id
+                and assessment.sources and assessment.overlap in ("adjacent_business", "possible_overlap", "direct_substitute")):
+            add("portfolio_overlap", f"LLM assessment: {companies[assessment.company_id].name} ? "
                 f"{assessment.overlap.replace('_', ' ')}. {assessment.rationale}", assessment.sources, "LLM assessment")
-    for company in companies.values():
-        if normalized_name(company.name) in {normalized_name(name) for name in founder.startup.known_competitors}:
-            add("founder_competitor", f"Founder supplied: {company.name} is a known competitor. Confirm whether the overlap affects an introduction.",
-                company.sources, "Founder supplied")
     for criterion in profile.ticket_criteria:
         lo, hi = criterion.minimum_eur, criterion.maximum_eur
         above = lo is not None and lo > founder.round.remaining_eur
@@ -413,47 +430,74 @@ def score_candidate(profile: InvestorProfile, shared_rounds: list[FundingRound],
             add("historical_mandate", "Published mandate has unclear current applicability; confirm current stage and geography appetite.", mandate.sources)
     statuses = statuses_for(investor, founder)
     if statuses:
-        add("existing_relationship", "Founder supplied: " + ", ".join(s.value.replace("_", " ") for s in statuses) + ".", [], "Founder supplied")
+        add("existing_relationship", "Founder supplied: " + ", ".join(status.value.replace("_", " ") for status in statuses) + ".", [], "Founder supplied")
     if founder.preferences.investor_countries and not (investor.country and _entity_fact_sources(investor, "country")):
-        add("country_unknown", "The founder's investor-country preference cannot be verified from sourced investor facts; confirm eligibility.",
-            [], "Founder supplied")
+        add("country_unknown", "The founder's investor-country preference cannot be verified from sourced investor facts; confirm eligibility.", [], "Founder supplied")
     if ((not founder.preferences.include_angels or not founder.preferences.include_corporate_vcs)
             and not (investor.kind in ("vc", "angel", "corporate_vc") and _entity_fact_sources(investor, "kind"))):
-        add("investor_type_unknown", "The founder's investor-type preference cannot be verified from sourced investor facts; confirm eligibility.",
-            [], "Founder supplied")
+        add("investor_type_unknown", "The founder's investor-type preference cannot be verified from sourced investor facts; confirm eligibility.", [], "Founder supplied")
     card = CandidateCard(
-        investor=investor,
-        fit_score=int(math.floor(sum(c.weight * c.value for c in components) + 0.5)),
-        profile_completeness=sum(c.weight for c in components if c.known) / 100,
-        explanation=f"{len(shared)} shared rounds across {len(latest_by_company)} companies; score prioritizes introductions and is not an investment probability.",
-        shared_round_count=len(shared), shared_company_count=len(latest_by_company), shared_deals=shared[:3],
-        recent_rounds_12m=len(recent) if activity.known else None,
+        investor=investor, fit_score=payload["score"],
+        profile_completeness=sum(item.weight for item in components if item.known) / 100,
+        explanation=main_scoring.build_reason(payload, lead.name),
+        shared_round_count=len(shared), shared_company_count=len({item.company.id for item in shared}),
+        shared_deals=shared[:3], recent_rounds_12m=payload["rounds_12m"],
         most_recent_investment=max((item.event_date for item in known_behavior), default=None),
         components=components, considerations=considerations, statuses=statuses, profile=profile,
         sources=unique_sources(investor.sources + profile.sources + _sources(shared + observed) + _sources(known_behavior)
-                               + [s for component in components for s in component.sources]),
-        action="follow_up" if any(s in statuses for s in (InvestorStatus.EXISTING_SHAREHOLDER,
+                               + [source for component in components for source in component.sources]),
+        action="follow_up" if any(status in statuses for status in (InvestorStatus.EXISTING_SHAREHOLDER,
                                   InvestorStatus.ALREADY_APPROACHED, InvestorStatus.IN_CONVERSATION,
                                   InvestorStatus.CONDITIONAL_INTEREST)) else "introduction",
-        draft="",
+        review_status=payload["status"], flags=flags, estimated_ticket_eur=estimated_ticket,
+        ticket_estimate_basis=ticket_basis, draft="",
     )
     card.draft = _draft(card, founder, lead)
     return card
+
+
+def build_allocation(cards: list[CandidateCard], remaining: Decimal) -> list[AllocationItem]:
+    """Main's greedy allocation, with exact EUR amounts and explicit proxy labels."""
+    if remaining <= 0:
+        return []
+    eligible = [card for card in rank_candidates(cards) if card.review_status == "short"]
+    rows = main_scoring.allocation([
+        {"id": card.investor.id, "name": card.investor.name,
+         "ticket": card.estimated_ticket_eur.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+         if card.estimated_ticket_eur is not None else None}
+        for card in eligible], remaining)
+    result = []
+    percentages = [(Decimal(str(row["eur"])) / remaining * 100).quantize(Decimal("0.0001")) for row in rows]
+    # Apply display-rounding residue to the largest share, which avoids a tiny
+    # negative final percentage when several preceding shares rounded upward.
+    if percentages:
+        largest = max(range(len(percentages)), key=percentages.__getitem__)
+        percentages[largest] += Decimal(100) - sum(percentages)
+    by_id = {card.investor.id: card for card in eligible}
+    for index, row in enumerate(rows):
+        amount = Decimal(str(row["eur"])).quantize(Decimal("0.01"))
+        card = by_id.get(row["id"])
+        basis = card.ticket_estimate_basis if card else "Unallocated remainder after available eligible EUR estimates."
+        result.append(AllocationItem(investor_id=row["id"], name=row["name"], amount_eur=amount,
+                                     percentage=float(percentages[index]), basis=basis or "Equal-share heuristic; actual investor checks unknown."))
+    return result
 
 
 def rank_candidates(cards: list[CandidateCard]) -> list[CandidateCard]:
     def key(card: CandidateCard):
         connection = next(c.value for c in card.components if c.name == "co_investment")
         most_recent = max((r.event_date for r in card.shared_deals if r.event_date), default=date.min)
-        return (-card.fit_score, -connection, -most_recent.toordinal(), normalized_name(card.investor.name), card.investor.id)
+        return (card.review_status != "short", -card.fit_score, -connection, -most_recent.toordinal(), normalized_name(card.investor.name), card.investor.id)
     return sorted(cards, key=key)
 
 
 def combined_draft(cards: list[CandidateCard], founder: FounderInput, lead: Entity) -> str:
-    chosen = rank_candidates(cards)[:3]
+    chosen = [card for card in rank_candidates(cards) if card.review_status == "short"][:3]
     if not chosen:
         return ""
-    provisional = " Your lead commitment is provisional." if founder.round.lead_status == "conditional" else ""
+    provisional = (" Your lead commitment is provisional." if founder.round.lead_status == "conditional"
+                   else " The selected lead's commitment to this round has not been confirmed."
+                   if founder.round.lead_status == "unconfirmed" else "")
     lines = [f"Hi {lead.name},", "", f"We are raising a {founder.round.stage.replace('_', ' ')} round for "
              f"{founder.startup.company_name}, with {_eur(founder.round.remaining_eur)} remaining after firm commitments.{provisional}",
              "Could you advise whether these introductions or next steps would be appropriate?", ""]

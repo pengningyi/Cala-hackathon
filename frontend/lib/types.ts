@@ -58,11 +58,11 @@ export interface Startup {
 }
 
 export interface RoundInput {
-  stage: "seed" | "series_a";
+  stage: "pre_seed" | "seed" | "series_a" | "series_b";
   target_eur: DecimalString;
   firm_commitments_eur: DecimalString;
   conditional_interest_eur?: DecimalString;
-  lead_status: "signed" | "firm_verbal" | "conditional";
+  lead_status: "signed" | "firm_verbal" | "conditional" | "unconfirmed";
   lead_ticket_eur?: DecimalString | null;
 }
 
@@ -85,6 +85,7 @@ export interface FounderInput {
   lead_name: string;
   investor_statuses: StatusEntry[];
   preferences: Preferences;
+  excluded_investors?: string[];
 }
 
 export interface ResolveRequest {
@@ -102,6 +103,15 @@ export interface Resolution {
   expires_at: string;
   no_open_allocation: boolean;
   notices: string[];
+  detected_lead?: {
+    lead: Entity;
+    company_id: string | null;
+    event_id: string | null;
+    stage: string | null;
+    event_date: string | null;
+    event_date_precision?: string | null;
+    sources: Source[];
+  } | null;
 }
 
 export interface StartRunRequest {
@@ -227,6 +237,24 @@ export interface CandidateCard {
   sources: Source[];
   action: "introduction" | "follow_up";
   draft: string;
+  review_status?: "short" | "flagged";
+  flags?: Array<{
+    kind: string;
+    severity: "red" | "grey" | "amber";
+    reason: string;
+    company: string | null;
+    sources: Source[];
+  }>;
+  estimated_ticket_eur?: DecimalString | null;
+  ticket_estimate_basis?: string | null;
+}
+
+export interface AllocationItem {
+  investor_id: string | null;
+  name: string;
+  amount_eur: DecimalString;
+  percentage: number;
+  basis: string;
 }
 
 export interface ProgressEvent {
@@ -263,6 +291,7 @@ export interface RunResult {
   cache_hits: number;
   retrieval_timestamps: string[];
   scoring_version: string;
+  allocation?: AllocationItem[];
   error: Record<string, unknown> | null;
 }
 

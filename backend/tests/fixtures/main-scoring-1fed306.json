@@ -1,0 +1,646 @@
+{
+  "source_commit": "1fed306569d6da04a6f815e9d6b1664eed7a707c",
+  "as_of": "2026-11-14",
+  "cases": [
+    {
+      "name": "one_recent_shared_all_signals",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 2000000,
+        "competitors": []
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed"
+          }
+        ],
+        "rounds": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed",
+            "sector": "AI infrastructure",
+            "lead": false,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          }
+        ]
+      },
+      "expected": {
+        "score": 68,
+        "signals": {
+          "coinv": {
+            "v": 0.5,
+            "label": "1 shared deal with lead"
+          },
+          "activity": {
+            "v": 0.25,
+            "label": "1 rounds in 12 months"
+          },
+          "stage": {
+            "v": 1.0,
+            "label": "100% of rounds at Seed"
+          },
+          "sector": {
+            "v": 1.0,
+            "label": "100% in your sector"
+          },
+          "follow": {
+            "v": 1.0,
+            "label": "follows in 100% of rounds"
+          },
+          "geo": {
+            "v": 1.0,
+            "label": "has deals in Finland"
+          }
+        },
+        "flags": [],
+        "status": "short",
+        "rounds_12m": 1,
+        "last_date": "2026-10-01",
+        "lead_ratio": 0.0,
+        "ticket": 1000000.0
+      }
+    },
+    {
+      "name": "three_shared_followons_cap_connection",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 2000000,
+        "competitors": []
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed"
+          },
+          {
+            "company": "Portfolio A",
+            "date": "2025-09-01",
+            "stage": "Seed"
+          },
+          {
+            "company": "Portfolio A",
+            "date": "2023-09-01",
+            "stage": "Seed"
+          }
+        ],
+        "rounds": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed",
+            "sector": "AI infrastructure",
+            "lead": false,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          },
+          {
+            "company": "Portfolio B",
+            "date": "2025-09-01",
+            "stage": "Series A",
+            "sector": "AI infrastructure",
+            "lead": true,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          },
+          {
+            "company": "Portfolio C",
+            "date": "2025-03-01",
+            "stage": "Series A",
+            "sector": "Retail",
+            "lead": null,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          }
+        ]
+      },
+      "expected": {
+        "score": 65,
+        "signals": {
+          "coinv": {
+            "v": 1.0,
+            "label": "3 shared deals with lead"
+          },
+          "activity": {
+            "v": 0.25,
+            "label": "1 rounds in 12 months"
+          },
+          "stage": {
+            "v": 0.3333333333333333,
+            "label": "33% of rounds at Seed"
+          },
+          "sector": {
+            "v": 0.6666666666666666,
+            "label": "67% in your sector"
+          },
+          "follow": {
+            "v": 0.5,
+            "label": "follows in 50% of rounds"
+          },
+          "geo": {
+            "v": 1.0,
+            "label": "has deals in Finland"
+          }
+        },
+        "flags": [],
+        "status": "short",
+        "rounds_12m": 1,
+        "last_date": "2026-10-01",
+        "lead_ratio": 0.5,
+        "ticket": 1000000.0
+      }
+    },
+    {
+      "name": "no_profile_history_unknowns_zero",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 2000000,
+        "competitors": []
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Old Portfolio",
+            "date": "2023-01-01"
+          }
+        ],
+        "rounds": []
+      },
+      "expected": {
+        "score": 12,
+        "signals": {
+          "coinv": {
+            "v": 0.3333333333333333,
+            "label": "1 shared deal with lead"
+          },
+          "activity": {
+            "v": null,
+            "label": "activity unknown"
+          },
+          "stage": {
+            "v": null,
+            "label": "unknown"
+          },
+          "sector": {
+            "v": null,
+            "label": "unknown"
+          },
+          "follow": {
+            "v": null,
+            "label": "unknown"
+          },
+          "geo": {
+            "v": null,
+            "label": "unknown"
+          }
+        },
+        "flags": [],
+        "status": "short",
+        "rounds_12m": null,
+        "last_date": null,
+        "ticket": null
+      }
+    },
+    {
+      "name": "missing_ratio_values_still_in_denominator",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 2000000,
+        "competitors": []
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01"
+          }
+        ],
+        "rounds": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed",
+            "sector": "AI infrastructure",
+            "lead": false,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          },
+          {
+            "company": "Portfolio B",
+            "date": "2026-09-01",
+            "stage": null,
+            "sector": null,
+            "lead": null,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": null
+          },
+          {
+            "company": "Portfolio C",
+            "date": "2026-08-01",
+            "stage": "Series A",
+            "sector": "Retail",
+            "lead": true,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Sweden"
+          }
+        ]
+      },
+      "expected": {
+        "score": 52,
+        "signals": {
+          "coinv": {
+            "v": 0.5,
+            "label": "1 shared deal with lead"
+          },
+          "activity": {
+            "v": 0.75,
+            "label": "3 rounds in 12 months"
+          },
+          "stage": {
+            "v": 0.3333333333333333,
+            "label": "33% of rounds at Seed"
+          },
+          "sector": {
+            "v": 0.3333333333333333,
+            "label": "33% in your sector"
+          },
+          "follow": {
+            "v": 0.5,
+            "label": "follows in 50% of rounds"
+          },
+          "geo": {
+            "v": 1.0,
+            "label": "has deals in Finland"
+          }
+        },
+        "flags": [],
+        "status": "short",
+        "rounds_12m": 3,
+        "last_date": "2026-10-01",
+        "lead_ratio": 0.5,
+        "ticket": 1000000.0
+      }
+    },
+    {
+      "name": "main_three_round_ratio_flags",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 2000000,
+        "competitors": []
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Portfolio A",
+            "date": "2025-01-01",
+            "stage": "Series A"
+          }
+        ],
+        "rounds": [
+          {
+            "company": "Portfolio A",
+            "date": "2025-01-01",
+            "stage": "Series A",
+            "sector": "AI infrastructure",
+            "lead": true,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          },
+          {
+            "company": "Portfolio B",
+            "date": "2025-02-01",
+            "stage": "Series A",
+            "sector": "AI infrastructure",
+            "lead": true,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          },
+          {
+            "company": "Portfolio C",
+            "date": "2025-03-01",
+            "stage": "Series A",
+            "sector": "AI infrastructure",
+            "lead": true,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          }
+        ]
+      },
+      "expected": {
+        "score": 38,
+        "signals": {
+          "coinv": {
+            "v": 0.5,
+            "label": "1 shared deal with lead"
+          },
+          "activity": {
+            "v": 0.0,
+            "label": "0 rounds in 12 months"
+          },
+          "stage": {
+            "v": 0.0,
+            "label": "0% of rounds at Seed"
+          },
+          "sector": {
+            "v": 1.0,
+            "label": "100% in your sector"
+          },
+          "follow": {
+            "v": 0.0,
+            "label": "follows in 0% of rounds"
+          },
+          "geo": {
+            "v": 1.0,
+            "label": "has deals in Finland"
+          }
+        },
+        "flags": [
+          {
+            "kind": "inactive",
+            "severity": "grey",
+            "reason": "No round found since 2025-03-01"
+          },
+          {
+            "kind": "lead-only",
+            "severity": "grey",
+            "reason": "Leads 100% of its rounds"
+          },
+          {
+            "kind": "stage",
+            "severity": "grey",
+            "reason": "Rarely invests at Seed"
+          }
+        ],
+        "status": "flagged",
+        "rounds_12m": 0,
+        "last_date": "2025-03-01",
+        "lead_ratio": 1.0,
+        "ticket": 1000000.0
+      }
+    },
+    {
+      "name": "founder_competitor_flag",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 2000000,
+        "competitors": [
+          "Portfolio A"
+        ]
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed"
+          }
+        ],
+        "rounds": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed",
+            "sector": "AI infrastructure",
+            "lead": false,
+            "amount": 3000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          }
+        ]
+      },
+      "expected": {
+        "score": 68,
+        "signals": {
+          "coinv": {
+            "v": 0.5,
+            "label": "1 shared deal with lead"
+          },
+          "activity": {
+            "v": 0.25,
+            "label": "1 rounds in 12 months"
+          },
+          "stage": {
+            "v": 1.0,
+            "label": "100% of rounds at Seed"
+          },
+          "sector": {
+            "v": 1.0,
+            "label": "100% in your sector"
+          },
+          "follow": {
+            "v": 1.0,
+            "label": "follows in 100% of rounds"
+          },
+          "geo": {
+            "v": 1.0,
+            "label": "has deals in Finland"
+          }
+        },
+        "flags": [
+          {
+            "kind": "conflict",
+            "severity": "red",
+            "reason": "Backed competitor Portfolio A (Seed, 2026-10-01)",
+            "company": "Portfolio A",
+            "source": null
+          }
+        ],
+        "status": "flagged",
+        "rounds_12m": 1,
+        "last_date": "2026-10-01",
+        "lead_ratio": 0.0,
+        "ticket": 1000000.0
+      }
+    },
+    {
+      "name": "ticket_only_is_amber_and_eligible",
+      "ctx": {
+        "stage": "Seed",
+        "sector_terms": [
+          "ai infrastructure",
+          "data"
+        ],
+        "country": "Finland",
+        "open_eur": 500000,
+        "competitors": []
+      },
+      "candidate": {
+        "id": "candidate",
+        "name": "Candidate",
+        "origin": "lead-graph",
+        "shared": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed"
+          }
+        ],
+        "rounds": [
+          {
+            "company": "Portfolio A",
+            "date": "2026-10-01",
+            "stage": "Seed",
+            "sector": "AI infrastructure",
+            "lead": false,
+            "amount": 6000000,
+            "investors": [
+              "lead",
+              "candidate",
+              "other"
+            ],
+            "country": "Finland"
+          }
+        ]
+      },
+      "expected": {
+        "score": 68,
+        "signals": {
+          "coinv": {
+            "v": 0.5,
+            "label": "1 shared deal with lead"
+          },
+          "activity": {
+            "v": 0.25,
+            "label": "1 rounds in 12 months"
+          },
+          "stage": {
+            "v": 1.0,
+            "label": "100% of rounds at Seed"
+          },
+          "sector": {
+            "v": 1.0,
+            "label": "100% in your sector"
+          },
+          "follow": {
+            "v": 1.0,
+            "label": "follows in 100% of rounds"
+          },
+          "geo": {
+            "v": 1.0,
+            "label": "has deals in Finland"
+          }
+        },
+        "flags": [
+          {
+            "kind": "ticket",
+            "severity": "amber",
+            "reason": "Typical ticket ~\u20ac2.0M exceeds the open \u20ac0.5M"
+          }
+        ],
+        "status": "short",
+        "rounds_12m": 1,
+        "last_date": "2026-10-01",
+        "lead_ratio": 0.0,
+        "ticket": 2000000.0
+      }
+    }
+  ]
+}

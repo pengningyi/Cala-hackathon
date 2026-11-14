@@ -25,7 +25,7 @@ async function resolveWith(page: Page, matches: Entity[]) {
     } });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Find my lead", exact: true }).click();
+  await page.getByRole("button", { name: "Match entities in Cala", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Choose your lead", exact: true })).toBeVisible();
 }
 

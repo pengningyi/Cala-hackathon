@@ -36,14 +36,14 @@ def component(card, name):
     return next(item for item in card.components if item.name == name)
 
 
-def test_duplicate_rounds_and_followons_do_not_multiply_company_breadth():
+def test_duplicate_ids_deduplicate_but_main_scoring_counts_distinct_followons():
     first = funding()
     followon = funding(id="round2", when=date(2026, 10, 14))
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[first, first, followon]),
                            [first, first, followon], founder(), LEAD, TODAY)
     assert card.shared_round_count == 2
     assert card.shared_company_count == 1
-    assert component(card, "co_investment").value == pytest.approx(1 / 3)
+    assert component(card, "co_investment").value == 1
     assert component(card, "recent_activity").value == .5
 
 
@@ -63,28 +63,33 @@ def test_unsourced_or_future_shared_events_cannot_support_a_card():
             score_candidate(InvestorProfile(investor=INVESTOR), [event], founder(), LEAD, TODAY)
 
 
-def test_unknown_denominators_keep_neutral_weights_and_separate_completeness():
+def test_unknown_fields_contribute_zero_under_main_scoring_with_separate_completeness():
     event = funding(stage=None, role=None, country=None)
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[event]), [event], founder(), LEAD, TODAY)
     for name in ["stage_fit", "sector_fit", "non_lead_participation", "geography_fit"]:
         value = component(card, name)
         assert not value.known
-        assert value.value == .5
+        assert value.value == 0
         assert value.denominator is None
     assert card.profile_completeness == .55
-    assert card.fit_score == 39  # 35/3 + 20/4 + (15+15+10+5)/2, rounded half-up.
+    assert card.fit_score == 22  # main:35*.5 +20*.25, Python round(22.5).
 
 
-def test_frozen_sector_assessments_and_explicit_roles_are_used_once_per_company():
+def test_main_sector_keywords_ignore_llm_numeric_assessments_and_keep_explicit_roles():
     event = funding()
     profile = InvestorProfile(investor=INVESTOR, rounds=[event, funding(id="followon")],
         assessments=[Assessment(company_id="company1", sector_fit="adjacent", rationale="Adjacent buyer", sources=[SOURCE])])
     card = score_candidate(profile, [event], founder(), LEAD, TODAY)
-    assert component(card, "sector_fit").value == .5
-    assert component(card, "sector_fit").denominator == 1
+    assert component(card, "sector_fit").value == 0
+    assert not component(card, "sector_fit").known
     assert component(card, "non_lead_participation").value == 1
-    assert card.profile_completeness == 1
-    assert "LLM assessment" in component(card, "sector_fit").explanation
+    assert card.profile_completeness == .85
+    event.sector = "Fintech business payments"
+    profile.rounds[1].sector = event.sector
+    sourced_card = score_candidate(profile, [event], founder(), LEAD, TODAY)
+    assert component(sourced_card, "sector_fit").value == 1
+    assert component(sourced_card, "sector_fit").denominator == 2
+    assert sourced_card.profile_completeness == 1
 
 
 def test_status_precedence_and_identity_disambiguation():
@@ -112,14 +117,17 @@ def test_current_published_minimum_excludes_but_historical_typical_and_unclear_m
     assert exclusion_for(INVESTOR, founder(), LEAD, profile) is None
 
 
-def test_historical_lead_behavior_low_activity_and_overlap_remain_advisory():
+def test_main_inactivity_flags_and_ratio_minimums_preserve_separate_overlap_context():
     event = funding(when=date(2025, 1, 1), stage="Series A", role=True)
     profile = InvestorProfile(investor=INVESTOR, rounds=[event], activity_window_complete=True, sources=[SOURCE],
         assessments=[Assessment(company_id="company1", sector_fit="same", overlap="direct_substitute",
                                 rationale="Same product, buyer and problem from retrieved descriptions.", sources=[SOURCE])])
     card = score_candidate(profile, [event], founder(), LEAD, TODAY)
     assert exclusion_for(INVESTOR, founder(), LEAD, profile) is None
-    assert {item.code for item in card.considerations} >= {"low_recent_activity", "limited_stage_history", "usually_leads", "portfolio_overlap"}
+    assert {item.code for item in card.considerations} >= {"low_recent_activity", "portfolio_overlap"}
+    assert not {"limited_stage_history", "usually_leads"} & {item.code for item in card.considerations}
+    assert card.review_status == "flagged"
+    assert {flag.kind for flag in card.flags} == {"inactive"}
     assert all(item.sources for item in card.considerations if item.basis != "Founder supplied")
 
 
@@ -143,7 +151,7 @@ def test_stable_tiebreaks_country_mapping_and_calendar_boundaries():
     assert months_before(date(2024, 3, 31), 1) == date(2024, 2, 29)
     event = funding(country="SE")
     card = score_candidate(InvestorProfile(investor=INVESTOR, rounds=[event]), [event], founder(), LEAD, TODAY)
-    assert component(card, "geography_fit").value == .5
+    assert component(card, "geography_fit").value == 0
     a = card.model_copy(update={"investor": INVESTOR.model_copy(update={"id": "a", "name": "Alpha"})})
     b = card.model_copy(update={"investor": INVESTOR.model_copy(update={"id": "b", "name": "Beta"})})
     assert [c.investor.id for c in rank_candidates([b, a])] == ["a", "b"]
@@ -246,19 +254,19 @@ def test_legal_company_type_does_not_confirm_an_investor_category():
     ("Korea, Republic of", "South Korea"), ("Viet Nam", "Vietnam"),
     ("Taiwan, Province of China", "TW"), ("Moldova, Republic of", "Moldova"),
 ])
-def test_iso_metadata_country_names_match_founder_filters_and_region_mapping(canonical, preference):
+def test_iso_metadata_country_names_match_filters_with_main_exact_country_geography(canonical, preference):
     investor = INVESTOR.model_copy(update={"country": canonical, "country_sources": [SOURCE],
                                           "metadata_status": "retrieved"})
     context = founder(preferences=dict(investor_countries=[preference]))
     assert exclusion_for(investor, context, LEAD) is None
-    # These observed countries still match the same predefined region as before ISO normalization.
+    # ISO aliases align the field and filter, while main gives no regional bonus.
     context = founder(startup={**context.startup.model_dump(), "country": preference})
     card = score_candidate(InvestorProfile(investor=investor), [funding(country=canonical)], context, LEAD, TODAY)
     assert component(card, "geography_fit").value == 1
     regional_peer = "France" if preference == "Moldova" else "Japan"
     context = founder(startup={**context.startup.model_dump(), "country": regional_peer})
     card = score_candidate(InvestorProfile(investor=investor), [funding(country=canonical)], context, LEAD, TODAY)
-    assert component(card, "geography_fit").value == .5
+    assert component(card, "geography_fit").value == 0
 
 
 def test_enriched_portfolio_geography_uses_the_headquarters_fields_own_evidence():
