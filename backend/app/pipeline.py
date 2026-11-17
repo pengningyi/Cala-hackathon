@@ -17,6 +17,7 @@ from .models import (
 )
 from .onboarding import startup_prefill
 from .runtime import BudgetExceeded, ResponseCache, Retrieval, Trace, utcnow
+from .research_evidence import ResearchEvidenceJournal
 from .scoring import (
     build_allocation, combined_draft, deduplicate_rounds, exclusion_for, finalize_card, months_before, normalize_stage,
     normalized_name, score_candidate,
@@ -40,6 +41,7 @@ class RunRecord:
     trace: Trace = field(default_factory=Trace)
     result: RunResult | None = None
     task: asyncio.Task | None = None
+    research: ResearchEvidenceJournal = field(default_factory=ResearchEvidenceJournal)
 
     def status(self):
         return RunStatus(id=self.id, state=self.result.state if self.result else "running",

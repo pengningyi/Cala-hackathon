@@ -12,12 +12,13 @@ interface Props {
   onSelectInvestor: (id: string | null) => void;
   trace: ReactNode;
   onConversationChange?: (turns: ReportTurn[]) => void;
+  onEvidenceRevision?: (revision: number) => void;
 }
 
 type Tab = "chat" | "activity";
 
 /** Live result conversation and the original search trace share one panel. */
-export default function AgentInsights({ result, selectedInvestorId, onSelectInvestor, trace, onConversationChange }: Props) {
+export default function AgentInsights({ result, selectedInvestorId, onSelectInvestor, trace, onConversationChange, onEvidenceRevision }: Props) {
   const [tab, setTab] = useState<Tab>("chat");
   const id = useId();
   const chatTab = useRef<HTMLButtonElement>(null);
@@ -49,7 +50,7 @@ export default function AgentInsights({ result, selectedInvestorId, onSelectInve
     </div>
     <div id={`${id}-chat`} role="tabpanel" aria-labelledby={`${id}-chat-tab`}
       className="agent-insight-panel agent-insight-chat" hidden={tab !== "chat"}>
-      <ResultsChat key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={onSelectInvestor} embedded active={tab === "chat"} onConversationChange={onConversationChange} />
+      <ResultsChat key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={onSelectInvestor} embedded active={tab === "chat"} onConversationChange={onConversationChange} onEvidenceRevision={onEvidenceRevision} />
     </div>
     <div id={`${id}-activity`} role="tabpanel" aria-labelledby={`${id}-activity-tab`} tabIndex={0}
       className="agent-insight-panel agent-insight-activity" hidden={tab !== "activity"}>{trace}</div>

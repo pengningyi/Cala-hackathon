@@ -15,6 +15,7 @@ interface ResultsChatProps {
   active?: boolean;
   /** Completed turns (no welcome, no failed questions), for the round report. */
   onConversationChange?: (turns: ReportTurn[]) => void;
+  onEvidenceRevision?: (revision: number) => void;
 }
 
 interface Message {
@@ -72,22 +73,23 @@ function Citations({ sources }: { sources: Source[] }) {
 }
 
 function stepDetail(step: ChatToolStep): string {
-  if (step.status === "failed") return step.error || "Lookup failed";
+  if (step.status === "failed") return step.error || "Could not finish";
   if (step.status === "started") return "";
   return step.count === null ? "Done" : `${step.count} ${step.count === 1 ? "result" : "results"}`;
 }
 
 function ToolStepList({ steps }: { steps: ChatToolStep[] }) {
+  const roles = { chat: "Round assistant", research: "Research assistant", assessment: "Investor assessment", report: "Report assistant" };
   return <ol className="rc-chat-steps">{steps.map(step => <li key={step.id} className={`rc-chat-step rc-chat-step-${step.status}`}>
     {step.status === "started" ? <LoaderCircle size={12} className="spinning" /> : step.status === "done" ? <Check size={12} /> : <AlertCircle size={12} />}
-    <span>{step.label}</span>{stepDetail(step) && <small>{stepDetail(step)}</small>}
+    <span>{step.agent && <strong className="rc-chat-step-role">{roles[step.agent]}: </strong>}{step.label}</span>{stepDetail(step) && <small>{stepDetail(step)}</small>}
   </li>)}</ol>;
 }
 
 function ToolSteps({ steps }: { steps: ChatToolStep[] }) {
   if (!steps.length) return null;
   return <details className="rc-chat-citations rc-chat-lookups">
-    <summary><Database size={12} /><span>{steps.length} Cala {steps.length === 1 ? "lookup" : "lookups"} during this answer</span><ChevronDown size={12} /></summary>
+    <summary><Database size={12} /><span>{steps.length} {steps.length === 1 ? "activity" : "activities"} during this answer</span><ChevronDown size={12} /></summary>
     <ToolStepList steps={steps} />
   </details>;
 }
@@ -110,7 +112,7 @@ function CopyReply({ content }: { content: string }) {
 }
 
 /** A conversation scoped to one immutable run, synchronized with graph selection. */
-export default function ResultsChat({ result, selectedInvestorId, onSelectInvestor, embedded = false, active = true, onConversationChange }: ResultsChatProps) {
+export default function ResultsChat({ result, selectedInvestorId, onSelectInvestor, embedded = false, active = true, onConversationChange, onEvidenceRevision }: ResultsChatProps) {
   const [messages, setMessages] = useState<Message[]>(() => [welcome(result)]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -172,6 +174,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
     try {
       const reply = await streamRunChat(result.run_id, { message: question, history, selected_investor_id: investorId }, onStep, controller.signal);
       if (controller.signal.aborted || version !== requestVersion.current) return;
+      onEvidenceRevision?.(reply.evidence_revision);
       setMessages(previous => [...previous, {
         id: `answer-${nextMessage.current++}`, role: "assistant", content: reply.message,
         citations: reply.citations,
@@ -220,7 +223,7 @@ export default function ResultsChat({ result, selectedInvestorId, onSelectInvest
           })}</div>}
           <ToolSteps steps={message.toolSteps ?? []} />
           <Citations sources={message.citations} />
-          {message.origin && message.origin !== "welcome" && <div className="rc-chat-answer-meta"><span>{message.origin !== "model" ? "From retrieved evidence" : message.toolSteps?.length ? "Live model + Cala lookups" : "Live model response · based on this run"}</span><CopyReply content={message.content} /></div>}
+          {message.origin && message.origin !== "welcome" && <div className="rc-chat-answer-meta"><span>{message.origin !== "model" ? "From retrieved evidence" : message.toolSteps?.length ? "Live model + research activity" : "Live model response · based on this run"}</span><CopyReply content={message.content} /></div>}
         </div>
       </div>)}
       {busy && <div className="rc-chat-thinking" role="status">

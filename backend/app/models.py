@@ -460,7 +460,7 @@ class ChatRequest(Model):
 
 
 class ChatToolStep(Model):
-    """One Cala lookup the chat agent ran while answering."""
+    """A specialist handoff or Cala lookup during one answer."""
     id: str
     tool: str
     label: str
@@ -468,6 +468,7 @@ class ChatToolStep(Model):
     status: Literal["started", "done", "failed"]
     count: int | None = None
     error: str | None = None
+    agent: Literal["chat", "research", "assessment", "report"] | None = None
 
 
 class KnowledgeAnswer(Model):
@@ -484,3 +485,12 @@ class ChatResponse(Model):
     candidate_ids: list[str] = Field(default_factory=list, max_length=5)
     model_used: bool
     tool_steps: list[ChatToolStep] = Field(default_factory=list, max_length=40)
+    # Server-owned revision: chat reports available evidence; report records its exact snapshot.
+    evidence_revision: int = Field(default=0, ge=0)
+
+
+class ResearchEvidenceStatus(Model):
+    revision: int = Field(ge=0)
+    observation_count: int = Field(ge=0)
+    updated_at: datetime | None
+    truncated: bool = False

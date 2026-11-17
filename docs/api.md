@@ -342,7 +342,7 @@ Responses include `message`, sourced `citations`, referenced `candidate_ids`, an
 `model_used`. Successful runtime replies use the configured Codex CLI or
 OpenAI-compatible API and return `model_used: true`. Each question triggers a
 model request with the immutable result, selected investor and bounded recent
-conversation history. No new Cala query is made. The backend resolves returned
+conversation history. In snapshot-only mode no new Cala query is made. The backend resolves returned
 citation references and investor IDs against the supplied evidence; the model
 cannot add arbitrary source URLs or replace source dates.
 
@@ -350,7 +350,11 @@ Supported topics include priorities, comparison, shared-event graph paths, saved
 introduction/follow-up requests, participation criteria, unknowns, considerations
 and exclusions, plus main's flags and estimated allocation percentages. Answers
 preserve the recorded ranking and never change founder
-statuses or run new discovery. Sources retain their dates. Pending results return
+statuses. Live retrieval has a request-scoped budget and never changes the saved discovery
+result. After a successful validated chat answer, actual sourced tool observations are
+retained in a separate, bounded per-run research journal for report generation. Generated
+assistant statements are not evidence; failed/cancelled answers do not commit observations.
+Sources retain their dates. Pending results return
 HTTP 409, missing/expired runs 404, invalid selection 400, and invalid input 422.
 Disabled or unavailable model configuration returns an explicit error rather
 than a successful canned response. Generation deadlines and concurrent capacity
@@ -375,13 +379,68 @@ catalog, so answers can cite them under the same server-side validation. Tool
 findings are labelled as live lookups and never change the saved result. The
 Codex provider keeps snapshot-only chat.
 
+With `MULTI_AGENTS_ENABLED=true` (default), chat instead exposes only
+`request_research` and `final_answer`. A separate Research Agent receives a
+focused question and known IDs, chooses among the Cala tools above, and returns
+validated cited findings, server-registered observations and unknowns. Both loops
+share the same retrieval deadline, raw Cala-call allowance and 12-call model
+budget (`AGENT_MODEL_CALL_LIMIT`), with one final chat call reserved. Research is
+limited by `RESEARCH_MAX_TOOL_ROUNDS=3` and `RESEARCH_MAX_MODEL_CALLS=5` per
+delegation. Set `MULTI_AGENTS_ENABLED=false` for the original direct-tool loop.
+
 `POST /api/runs/{id}/chat/stream` takes the same request and returns
 `text/event-stream`. It sends one `step` event for each lookup state change,
 with fields `{id, tool, label, arguments, status: started|done|failed, count, error}`.
+An optional `agent` field attributes research/chat activity. Delegation steps use
+`tool: "request_research"`; they are agent activity, not additional raw Cala calls.
 The stream ends with one `answer` event (a chat response) or one `error` event
 (`{code, message, status}`). Run-readiness and selection errors are returned as
 normal JSON errors before the stream starts. Responses from both endpoints
 include `tool_steps`, the lookups used for that answer.
+
+Successful chat responses also include `evidence_revision`, the available per-run research
+revision. Duplicate observations with unchanged source/content do not increment it.
+`GET /api/runs/{id}/evidence` returns a read-only freshness status:
+
+```json
+{"revision": 2, "observation_count": 3, "updated_at": "2026-11-17T12:00:00Z", "truncated": false}
+```
+
+There are no model/Cala calls for this check, and no client evidence-write endpoint.
+Journals share the run's in-memory retention and restart behavior, retain at most 32
+observations/60 KB, and mark truncation when older observations are evicted.
+
+### Founder report
+
+`POST /api/runs/{id}/report` invokes the separate Report Agent:
+
+```json
+{"history": [{"role": "user", "content": "Focus on next steps for the top investors."}]}
+```
+
+History is optional, limited to eight messages and 4,000 characters per message.
+It supplies conversation topics only; factual claims and citations must come from
+the saved result or the run's server-recorded Cala research observations. Transient
+chat source IDs do not become report evidence merely because they appear in history.
+The server captures an isolated research snapshot when generation starts and remaps
+its source references into the report catalogue. The response has the same `ChatResponse`
+shape as chat, with Markdown narrative, validated citations and `evidence_revision`
+identifying that exact snapshot. Findings arriving during generation make this report
+outdated rather than silently changing its evidence. Clients cannot submit observations
+or choose the authoritative revision through the report request.
+
+The frontend retains deterministic snapshot facts, actions and ranking alongside the
+narrative, caches successful reports within the workspace and shows "New findings available"
+with an explicit "Update report" action when a newer revision exists. A failed update keeps
+the previous report/export available. Reopening a successful report does not generate again.
+
+Unknown/not-ready runs return 404/409. Disabled providers return
+`report_disabled` (503), busy generation `report_busy` (429), invalid output
+`report_invalid_output` (502), and timeout `report_timeout` (504). Browser
+disconnect cancels generation. `REPORT_TIMEOUT_SECONDS=45` leaves headroom under
+the frontend's 60-second proxy limit. At most one output-validation repair is
+attempted. Report copy/download remains available when generation fails; this
+endpoint does not publish externally.
 
 ## Errors and retention
 

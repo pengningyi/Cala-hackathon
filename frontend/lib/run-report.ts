@@ -1,4 +1,6 @@
 import type { CandidateCard, RunResult } from "./types";
+import type { RunChatResponse } from "./chat-api";
+import { linkCitations } from "./chat-citations";
 import { ACTION_LABELS, ORIGIN_LABELS } from "./trust-labels";
 
 /** One completed chat message, as the results chat reports it. */
@@ -237,9 +239,23 @@ export function reportFilename(report: RunReport): string {
   return `${slug}-report-${iso}.md`;
 }
 
-export function reportMarkdown(report: RunReport): string {
+export function reportMarkdown(report: RunReport, narrative?: RunChatResponse | null): string {
   const lines = [`# ${report.title}`, "", `_Generated ${reportDate(report.generatedAt)}_`, "", "## Summary", "", report.summary, "",
-    ...report.round.map(item => `- **${item.label}:** ${item.value}`), "", "## Key next actions", ""];
+    ...report.round.map(item => `- **${item.label}:** ${item.value}`), ""];
+  if (narrative) {
+    // Resolve inline references to real source URLs so exported citations work outside the app.
+    const message = linkCitations(narrative.message, narrative.citation_ids)
+      .replace(/\[(\d+)\]\(#cite-(\d+)\)/g, (match, label: string, position: string) => {
+        const source = narrative.citations[Number(position) - 1];
+        return source ? `[${label}](<${source.url.replace(/</g, "%3C").replace(/>/g, "%3E")}>)` : match;
+      });
+    lines.push("## Founder analysis", "", message, "");
+    if (narrative.citations.length) {
+      lines.push("### Sources", "", ...narrative.citations.map((source, index) =>
+        `${index + 1}. [${source.label.replace(/[\\[\]]/g, "\\$&") || "Source"}](<${source.url.replace(/</g, "%3C").replace(/>/g, "%3E")}>)`), "");
+    }
+  }
+  lines.push("## Key next actions", "");
   if (report.actions.length) report.actions.forEach((action, index) => lines.push(`${index + 1}. ${action.text} _(${action.source})_`));
   else lines.push("No actions yet.");
   lines.push("", "## Top investors", "");

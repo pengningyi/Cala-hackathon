@@ -20,6 +20,8 @@ export interface ChatToolStep {
   status: "started" | "done" | "failed";
   count: number | null;
   error: string | null;
+  /** Optional for compatibility with saved answers and older servers. */
+  agent?: "chat" | "research" | "assessment" | "report" | null;
 }
 
 export interface RunChatResponse {
@@ -29,6 +31,15 @@ export interface RunChatResponse {
   candidate_ids: string[];
   model_used: boolean;
   tool_steps: ChatToolStep[];
+  /** Exact saved evidence included in this response; older backends default to zero. */
+  evidence_revision: number;
+}
+
+export interface RunEvidenceStatus {
+  revision: number;
+  observation_count: number;
+  updated_at: string | null;
+  truncated: boolean;
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -45,6 +56,24 @@ function source(value: unknown): value is Source {
   } catch {
     return false;
   }
+}
+
+function revision(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Read-only check for findings saved by another question or reconnected session. */
+export async function getRunEvidenceStatus(runId: string, signal?: AbortSignal): Promise<RunEvidenceStatus> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/evidence`, {
+    credentials: "same-origin", cache: "no-store", signal, headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new ApiError("evidence_unavailable", "Could not check for new findings.", response.status);
+  const payload: unknown = await response.json();
+  if (!object(payload) || !revision(payload.revision) || !revision(payload.observation_count)
+      || !(payload.updated_at === null || typeof payload.updated_at === "string") || typeof payload.truncated !== "boolean") {
+    throw new ApiError("invalid_evidence_status", "Could not check for new findings.", response.status);
+  }
+  return payload as unknown as RunEvidenceStatus;
 }
 
 /** Chat reuses this run's retrieved evidence; model credentials stay on the server. */
@@ -88,14 +117,48 @@ export async function askRunChat(
 
 function toolStep(value: unknown): value is ChatToolStep {
   return object(value) && typeof value.id === "string" && typeof value.tool === "string"
-    && typeof value.label === "string" && ["started", "done", "failed"].includes(value.status as string);
+    && typeof value.label === "string" && ["started", "done", "failed"].includes(value.status as string)
+    && (value.agent === undefined || value.agent === null || ["chat", "research", "assessment", "report"].includes(value.agent as string));
+}
+
+/** Generate a narrative from saved evidence; model credentials stay on the server. */
+export async function generateRunReport(
+  runId: string,
+  history: ChatHistoryMessage[],
+  signal?: AbortSignal,
+): Promise<RunChatResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/runs/${encodeURIComponent(runId)}/report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      signal,
+      body: JSON.stringify({ history: history.slice(-8).map(turn => ({ role: turn.role, content: turn.content.slice(0, 4000) })) }),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    throw new ApiError("network_error", "Could not reach the report assistant. Please try again.");
+  }
+  let payload: unknown;
+  try { payload = await response.json(); }
+  catch { throw new ApiError("invalid_report_response", "The founder analysis could not be read. Please try again.", response.status); }
+  if (!response.ok) {
+    throw new ApiError("report_unavailable", "Founder analysis is unavailable right now. You can still copy or download the report snapshot.", response.status);
+  }
+  try { return chatResponse(payload, response.status); }
+  catch {
+    throw new ApiError("invalid_report_response", "Founder analysis is unavailable right now. You can still copy or download the report snapshot.", response.status);
+  }
 }
 
 function chatResponse(payload: unknown, status: number): RunChatResponse {
   if (!object(payload) || typeof payload.message !== "string" || !payload.message.trim()
       || typeof payload.model_used !== "boolean" || !Array.isArray(payload.citations)
       || !payload.citations.every(source) || !Array.isArray(payload.candidate_ids)
-      || !payload.candidate_ids.every(id => typeof id === "string")) {
+      || !payload.candidate_ids.every(id => typeof id === "string")
+      || !(payload.evidence_revision === undefined || revision(payload.evidence_revision))) {
     throw new ApiError("invalid_chat_response", "The assistant response could not be read. Please try again.", status);
   }
   if (!payload.model_used) {
@@ -105,7 +168,8 @@ function chatResponse(payload: unknown, status: number): RunChatResponse {
   // Older backends omit citation_ids; inline references then stay as plain text.
   const citationIds = Array.isArray(payload.citation_ids) && payload.citation_ids.every(id => typeof id === "string")
     && payload.citation_ids.length === payload.citations.length ? payload.citation_ids as string[] : [];
-  return { ...(payload as unknown as RunChatResponse), tool_steps: steps, citation_ids: citationIds };
+  return { ...(payload as unknown as RunChatResponse), tool_steps: steps, citation_ids: citationIds,
+    evidence_revision: payload.evidence_revision as number | undefined ?? 0 };
 }
 
 /** Parse complete `event:`/`data:` frames from an SSE buffer; returns the unparsed remainder. */

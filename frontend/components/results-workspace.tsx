@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Copy, FileCheck2, FileText, Network, RotateCcw, X } from "lucide-react";
 import type { CandidateCard, RunResult, Source } from "../lib/types";
 import AgentInsights from "./agent-insights";
@@ -8,7 +8,7 @@ import ResultsGraph from "./results-graph";
 import AllocationSummary, { InvestorAllocation } from "./allocation-panel";
 import { ACTION_LABELS, ORIGIN_LABELS } from "../lib/trust-labels";
 import { RankingGuide } from "./score-explainer";
-import RunReportDialog from "./run-report";
+import RunReportDialog, { type SavedRunReport } from "./run-report";
 import type { ReportTurn } from "../lib/run-report";
 
 interface Props {
@@ -65,7 +65,12 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [combinedOpen, setCombinedOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [savedReport, setSavedReport] = useState<SavedRunReport | null>(null);
+  const [latestEvidenceRevision, setLatestEvidenceRevision] = useState(0);
+  const recordEvidenceRevision = useCallback((revision: number) => setLatestEvidenceRevision(current => Math.max(current, revision)), []);
   const [turns, setTurns] = useState<ReportTurn[]>([]);
+  const cachedReport = savedReport?.runId === result.run_id ? savedReport : null;
+  const newFindings = cachedReport !== null && latestEvidenceRevision > cachedReport.narrative.evidence_revision;
   const detailIndex = result.candidates.findIndex(card => card.investor.id === detailsId);
   const detailCard = result.candidates[detailIndex];
   const count = result.candidates.length;
@@ -79,6 +84,7 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
   useEffect(() => {
     setSelectedInvestorId(result.candidates[0]?.investor.id ?? null);
     setDetailsId(null); setCombinedOpen(false); setReportOpen(false); setTurns([]);
+    setSavedReport(null); setLatestEvidenceRevision(0);
   }, [result.run_id]);
 
   function showDetails(id: string) { setSelectedInvestorId(id); setDetailsId(id); }
@@ -86,7 +92,8 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
   return <div className="results-workspace-view">
     <div className="results-top workspace-top"><button className="back-link" onClick={onEdit}><ArrowLeft size={14} />Adjust your round</button>
       <div className="workspace-top-actions"><button type="button" className="button primary" disabled={busy} onClick={() => setReportOpen(true)}
-          title="Summary of this shortlist and your chat, with next actions"><FileText size={14} />Generate report</button>
+          title="Summary of this shortlist and your chat, with next actions"><FileText size={14} />{cachedReport ? "View report" : "Generate report"}</button>
+        {newFindings && <span className="workspace-report-update" role="status">New findings available</span>}
         {result.combined_draft && <CopyRequest text={result.combined_draft} label={`Copy ${Math.min(3, eligibleCount)}-investor request`} />}
         <button type="button" className="button text-button" disabled={busy} onClick={onRerun}><RotateCcw size={13} />Rerun search</button></div></div>
     <div className="hero workspace-hero"><h1>{heading}</h1></div>
@@ -122,7 +129,7 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
           {result.combined_draft && <button type="button" className="button text-button" onClick={() => setCombinedOpen(!combinedOpen)} aria-expanded={combinedOpen}>Combined request<ChevronDown size={13} /></button>}</footer>
         {combinedOpen && <div className="workspace-combined"><div><h3>Your combined request</h3><button type="button" className="button workspace-icon-button" aria-label="Close combined request" onClick={() => setCombinedOpen(false)}><X size={15} /></button></div><pre tabIndex={0}>{result.combined_draft}</pre><CopyRequest text={result.combined_draft} label="Copy combined request" /></div>}
       </section>
-      <div className="workspace-chat-panel"><AgentInsights key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={setSelectedInvestorId} trace={trace} onConversationChange={setTurns} /></div>
+      <div className="workspace-chat-panel"><AgentInsights key={result.run_id} result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={setSelectedInvestorId} trace={trace} onConversationChange={setTurns} onEvidenceRevision={recordEvidenceRevision} /></div>
       <div className="workspace-graph-panel"><ResultsGraph result={result} selectedInvestorId={selectedInvestorId} onSelectInvestor={setSelectedInvestorId} /></div>
     </div>
 
@@ -130,7 +137,8 @@ export default function ResultsWorkspace({ result, busy, error, onEdit, onRerun,
       {result.incomplete.length > 0 && <section className="supplementary"><h3>Incomplete profiles <span>{result.incomplete.length}</span></h3><p>These investors were not rejected; profiling did not finish in this run.</p>{result.incomplete.map(entity => <div className="supplementary-row" key={entity.id}><span>{entity.name}</span><span className="chip">Incomplete</span></div>)}</section>}
       {result.exclusions.length > 0 && <section className="supplementary"><h3>Excluded from this shortlist <span>{result.exclusions.length}</span></h3><p>Explicit founder rules or applicable published restrictions.</p>{result.exclusions.map((item, index) => <div className="exclusion-row" key={`${item.investor.id}-${index}`}><strong>{item.investor.name}</strong><p>{item.reason}</p>{renderSources(item.sources)}</div>)}</section>}
     </div>}
-    {reportOpen && <RunReportDialog result={result} turns={turns} onClose={() => setReportOpen(false)} />}
+    {reportOpen && <RunReportDialog key={result.run_id} result={result} turns={turns} savedReport={cachedReport}
+      latestEvidenceRevision={latestEvidenceRevision} onSaved={setSavedReport} onEvidenceRevision={recordEvidenceRevision} onClose={() => setReportOpen(false)} />}
     {detailCard && <DetailsDialog key={detailCard.investor.id} card={detailCard} onClose={() => setDetailsId(null)}>{renderInvestorDetails(detailCard, detailIndex)}</DetailsDialog>}
   </div>;
 }

@@ -207,18 +207,24 @@ class OpenAICompatibleSemantic:
     """
     enabled = True
 
-    def __init__(self, base_url: str, api_key: str, model: str, timeout_seconds: float = 8):
+    def __init__(self, base_url: str, api_key: str, model: str, timeout_seconds: float = 8,
+                 thinking_mode: str | None = None):
         if not (base_url and api_key and model):
             raise ValueError("OpenAI-compatible semantic provider requires base_url, api_key and model")
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.thinking_mode = thinking_mode
+
+    def _thinking_options(self):
+        return {"thinking": {"type": self.thinking_mode}} if self.thinking_mode is not None else {}
 
     async def assess(self, founder: FounderInput, profiles: list[InvestorProfile]) -> list[InvestorProfile]:
         prompt, allowed = _facts(founder, profiles)
         schema_payload = {
             "model": self.model,
+            **self._thinking_options(),
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_schema", "json_schema": {
                 "name": "cala_assessments", "strict": True, "schema": OUTPUT_SCHEMA,
@@ -229,6 +235,7 @@ class OpenAICompatibleSemantic:
         # The reply is validated by _apply either way.
         json_object_payload = {
             "model": self.model,
+            **self._thinking_options(),
             "messages": [
                 {"role": "system", "content": "Answer with a single JSON object (json) that matches this "
                                               "JSON Schema exactly, with no other text: " + json.dumps(OUTPUT_SCHEMA)},

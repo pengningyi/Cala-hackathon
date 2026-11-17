@@ -391,6 +391,144 @@
           }
         }
       }
+    },
+    "/api/runs/{run_id}/chat/stream": {
+      "post": {
+        "summary": "Result Chat Stream",
+        "description": "Server-sent events: `step` per Cala lookup, then one `answer` or `error`.",
+        "operationId": "result_chat_stream_api_runs__run_id__chat_stream_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/evidence": {
+      "get": {
+        "summary": "Research Evidence Status",
+        "description": "Read-only freshness check; no model generation or client-submitted evidence.",
+        "operationId": "research_evidence_status_api_runs__run_id__evidence_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchEvidenceStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/report": {
+      "post": {
+        "summary": "Result Report",
+        "description": "Report over one frozen saved-result and server-recorded research snapshot.",
+        "operationId": "result_report_api_runs__run_id__report_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -790,6 +928,14 @@
             "maxItems": 16,
             "title": "Citations"
           },
+          "citation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Citation Ids"
+          },
           "candidate_ids": {
             "items": {
               "type": "string"
@@ -801,6 +947,20 @@
           "model_used": {
             "type": "boolean",
             "title": "Model Used"
+          },
+          "tool_steps": {
+            "items": {
+              "$ref": "#/components/schemas/ChatToolStep"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "title": "Tool Steps"
+          },
+          "evidence_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Evidence Revision",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -810,6 +970,85 @@
           "model_used"
         ],
         "title": "ChatResponse"
+      },
+      "ChatToolStep": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Arguments"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "started",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "chat",
+                  "research",
+                  "assessment",
+                  "report"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "tool",
+          "label",
+          "status"
+        ],
+        "title": "ChatToolStep",
+        "description": "A specialist handoff or Cala lookup during one answer."
       },
       "CompanyConfirmation": {
         "properties": {
@@ -1948,6 +2187,60 @@
         "additionalProperties": false,
         "type": "object",
         "title": "Preferences"
+      },
+      "ReportRequest": {
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "History"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReportRequest"
+      },
+      "ResearchEvidenceStatus": {
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Revision"
+          },
+          "observation_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Observation Count"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "observation_count",
+          "updated_at"
+        ],
+        "title": "ResearchEvidenceStatus"
       },
       "Resolution": {
         "properties": {

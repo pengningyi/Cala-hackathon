@@ -321,9 +321,21 @@ largest share so the total is exactly 100%.
   cards, rules, loops and sources, plus recent history. The answer format limits
   `source_ids` and `candidate_ids` to that snapshot. The server rejects any answer
   with an unknown citation, an unknown investor, or a URL that is not a saved source
-  (or the startup's website). Chat cannot start new discovery or change the result.
+  (or a supplied entity/startup website). With an OpenAI-compatible model and
+  `MULTI_AGENTS_ENABLED=true`, chat can delegate new evidence lookups to a Research
+  Agent. Validated tool sources extend the request's catalogue; the stored result,
+  scores and allocation remain immutable. See [role separation](multi-agent-workflow.md).
   Concurrency is capped (`CHAT_MAX_CONCURRENCY`, default 2), and generation is
   cancelled when the browser disconnects.
+- **Reports:** a separate Report Agent generates narrative from saved-result evidence
+  and a frozen snapshot of server-recorded Cala observations saved after successful chat.
+  The per-run journal has bounded storage, deduplicates refetches and shares run retention;
+  source IDs are remapped across requests without modifying scores or shortlist facts.
+  Chat history supplies topics, not additional facts. Reports identify their evidence
+  revision. New findings mark the cached report outdated until the user requests an update.
+  The frontend preserves the
+  deterministic snapshot alongside the validated narrative and cited sources in
+  Markdown export. A failed model request leaves snapshot export available.
 - **Codex isolation:** both semantic assessment and chat run the Codex CLI as an
   ephemeral, read-only subprocess with external tools disabled. Cala credentials are
   removed from its environment, and prompts go through stdin, never command-line

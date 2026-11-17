@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     model_base_url: str | None = None
     model_api_key: str | None = None
     model_name: str | None = None
+    # Optional provider extension; omit it for generic OpenAI-compatible servers.
+    model_thinking_mode: Literal["enabled", "disabled"] | None = None
     model_timeout_seconds: float = Field(default=20, gt=0, le=30)
     chat_timeout_seconds: float = Field(default=90, gt=0, le=120)
     chat_max_concurrency: int = Field(default=2, ge=1, le=8)
@@ -34,6 +36,12 @@ class Settings(BaseSettings):
     chat_cala_call_limit: int = Field(default=24, ge=1, le=60)
     # knowledge_search takes ~40 s per query; off by default so chat stays responsive.
     chat_knowledge_search: bool = False
+    # Specialists share one request deadline, Cala budget and model-call allowance.
+    multi_agents_enabled: bool = True
+    research_max_tool_rounds: int = Field(default=3, ge=1, le=6)
+    research_max_model_calls: int = Field(default=5, ge=2, le=10)
+    agent_model_call_limit: int = Field(default=12, ge=3, le=30)
+    report_timeout_seconds: float = Field(default=45, gt=0, le=120)
 
     lookback_months: int = Field(default=60, ge=1, le=120)
     preliminary_limit: int = Field(default=15, ge=1, le=15)

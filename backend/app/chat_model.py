@@ -324,12 +324,16 @@ class CodexChatTransport:
 
 
 class OpenAICompatibleChatTransport:
-    def __init__(self, base_url, api_key, model, timeout_seconds=60):
+    def __init__(self, base_url, api_key, model, timeout_seconds=60, thinking_mode=None):
         self.base_url, self._api_key, self.model = base_url.rstrip("/"), api_key, model
         self.timeout_seconds = timeout_seconds
+        self.thinking_mode = thinking_mode
+
+    def _thinking_options(self):
+        return {"thinking": {"type": self.thinking_mode}} if self.thinking_mode is not None else {}
 
     def _schema_payload(self, messages):
-        return {"model": self.model, "messages": messages,
+        return {"model": self.model, "messages": messages, **self._thinking_options(),
                 "response_format": {"type": "json_schema", "json_schema": {
                     "name": "roundme_answer", "strict": True, "schema": _output_schema(messages),
                 }}, "max_completion_tokens": 2400}
@@ -339,7 +343,7 @@ class OpenAICompatibleChatTransport:
         # needs the schema spelled out in the prompt. The reply is still validated downstream.
         instruction = {"role": "system", "content": "Answer with a single JSON object (json) that matches "
                        "this JSON Schema exactly, with no other text: " + json.dumps(OUTPUT_SCHEMA)}
-        return {"model": self.model, "messages": [instruction, *messages],
+        return {"model": self.model, "messages": [instruction, *messages], **self._thinking_options(),
                 "response_format": {"type": "json_object"}, "max_tokens": 2400}
 
     async def _post(self, client, payload):
@@ -359,7 +363,7 @@ class OpenAICompatibleChatTransport:
     async def complete(self, messages, tools, tool_choice="required"):
         """One tool-calling turn; returns the assistant message (content / tool_calls)."""
         payload = {"model": self.model, "messages": messages, "tools": tools,
-                   "tool_choice": tool_choice, "max_tokens": 2400}
+                   "tool_choice": tool_choice, "max_tokens": 2400, **self._thinking_options()}
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 content = await self._post(client, payload)
@@ -405,7 +409,8 @@ class LiveResultChat:
             self.transport = CodexChatTransport(settings.codex_executable)
         elif settings.model_provider == "openai_compatible":
             self.transport = OpenAICompatibleChatTransport(settings.model_base_url, settings.model_api_key,
-                                                         settings.model_name, self.timeout_seconds)
+                                                         settings.model_name, self.timeout_seconds,
+                                                         thinking_mode=settings.model_thinking_mode)
         else:
             self.transport = None
 

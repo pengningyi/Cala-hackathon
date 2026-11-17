@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs/promises";
 import type { CandidateCard, Entity, FounderInput, FundingRound, RunResult, ScoreComponent, Source, StartRunRequest } from "../lib/types";
 
 const source: Source = { url: "https://synthetic.example.test/v2", label: "Synthetic v2 evidence",
@@ -92,6 +93,7 @@ async function mockApi(page: Page) {
       event_count: 1, result_url: "/api/runs/v2-run/result", events_url: "/api/runs/v2-run/events" } });
   });
   await page.route("**/api/runs/v2-run/result", route => route.fulfill({ json: result(runRequest!.profile) }));
+  await page.route("**/api/runs/v2-run/evidence", route => route.fulfill({ json: { revision: 0, observation_count: 0, updated_at: null, truncated: false } }));
   await page.route("**/api/runs/v2-run/events", route => route.fulfill({ contentType: "text/event-stream", body:
     `id: 1\nevent: complete\ndata: ${JSON.stringify({ id: 1, type: "complete", at: source.retrieved_at, step: "complete", message: "done" })}\n\n` }));
   return () => runRequest;
@@ -376,13 +378,29 @@ test("the shortlist generates a round report with next actions and chat highligh
     `event: answer\ndata: ${JSON.stringify({ message: "Kibo Ventures is your strongest fit. It co-invested with your lead.\n\n- Ask Synthetic Lead to introduce you to Kibo Ventures this week",
       citations: [], citation_ids: [], candidate_ids: ["kibo"], model_used: true, tool_steps: [] })}\n\n` }));
   await openGraph(page);
+  let reportCalls = 0;
+  let reportHistory: unknown;
+  await page.route("**/api/runs/v2-run/report", route => {
+    reportCalls += 1;
+    reportHistory = route.request().postDataJSON().history;
+    return route.fulfill({ json: { message: "Prioritize an introduction through your existing network [s1].", citations: [source], citation_ids: ["s1"],
+      candidate_ids: ["kibo"], model_used: true, tool_steps: [] } });
+  });
   await page.getByLabel("Ask about your investors").fill("Why Kibo?");
   await page.getByRole("button", { name: "Send question" }).click();
   await expect(page.getByText("Kibo Ventures is your strongest fit.")).toBeVisible();
+  expect(reportCalls).toBe(0);
 
   await page.getByRole("button", { name: "Generate report" }).click();
   const report = page.getByRole("dialog", { name: /Round report/ });
   await expect(report).toBeVisible();
+  await expect(report.getByRole("heading", { name: "Founder analysis" })).toBeVisible();
+  await expect(report.locator(".run-report-narrative")).toContainText("Prioritize an introduction through your existing network");
+  await expect(report.locator(".rc-cite a")).toHaveAttribute("href", source.url);
+  expect(reportHistory).toEqual([
+    { role: "user", content: "Why Kibo?" },
+    { role: "assistant", content: "Kibo Ventures is your strongest fit. It co-invested with your lead.\n\n- Ask Synthetic Lead to introduce you to Kibo Ventures this week" },
+  ]);
   await expect(report.getByRole("heading", { name: "Key next actions" })).toBeVisible();
   await expect(report.getByText("Ask Synthetic Lead to introduce you to Kibo Ventures this week.")).toBeVisible();
   await expect(report.locator(".run-report-q")).toHaveText("Why Kibo?");
@@ -398,9 +416,180 @@ test("the shortlist generates a round report with next actions and chat highligh
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toContain("## Key next actions");
   expect(copied).toContain("## Conversation highlights");
+  expect(copied).toContain("## Founder analysis");
+  expect(copied).toContain(`[1](<${source.url}>)`);
   const download = page.waitForEvent("download");
   await report.getByRole("button", { name: "Download .md" }).click();
-  expect((await download).suggestedFilename()).toMatch(/report-\d{4}-\d{2}-\d{2}\.md$/);
+  const downloaded = await download;
+  expect(downloaded.suggestedFilename()).toMatch(/report-\d{4}-\d{2}-\d{2}\.md$/);
+  expect((await fs.readFile((await downloaded.path())!, "utf8")).replace(/\r\n/g, "\n")).toBe(copied.replace(/\r\n/g, "\n"));
+  expect(reportCalls).toBe(1);
   await report.getByRole("button", { name: "Close report" }).click();
   await expect(report).toBeHidden();
+});
+
+test("a disabled report model leaves snapshot export usable and supports an explicit retry", async ({ page }) => {
+  await openGraph(page);
+  let calls = 0;
+  await page.route("**/api/runs/v2-run/report", route => {
+    calls += 1;
+    return route.fulfill({ json: { message: calls === 1 ? "Model disabled" : "Review the public professional overlap before requesting an introduction.",
+      citations: [], citation_ids: [], candidate_ids: [], model_used: calls > 1, tool_steps: [] } });
+  });
+  await page.getByRole("button", { name: "Generate report" }).click();
+  const report = page.getByRole("dialog", { name: /Round report/ });
+  await expect(report.getByRole("alert")).toContainText("You can still copy or download the report snapshot");
+  await expect(report.locator(".run-report-investors li").first()).toContainText("Kibo Ventures");
+  const download = page.waitForEvent("download");
+  await report.getByRole("button", { name: "Download .md" }).click();
+  const fallback = await fs.readFile((await (await download).path())!, "utf8");
+  expect(fallback).toContain("## Top investors");
+  expect(fallback).not.toContain("## Founder analysis");
+  await report.getByRole("button", { name: "Retry analysis" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Review the public professional overlap");
+  await expect(report.getByRole("alert")).toHaveCount(0);
+  expect(calls).toBe(2);
+});
+
+test("closing a pending report ignores the stale response when a new report is opened", async ({ page }) => {
+  await openGraph(page);
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/runs/v2-run/report", async route => {
+    const call = ++calls;
+    if (call === 1) await pending;
+    await route.fulfill({ json: { message: call === 1 ? "Stale founder analysis" : "Current founder analysis", citations: [], citation_ids: [],
+      candidate_ids: [], model_used: true, tool_steps: [] } }).catch(() => { /* the first request was cancelled on close */ });
+  });
+  await page.getByRole("button", { name: "Generate report" }).click();
+  await expect.poll(() => calls).toBe(1);
+  const report = page.getByRole("dialog", { name: /Round report/ });
+  await expect(report.getByRole("status")).toContainText("Preparing an analysis");
+  await report.getByRole("button", { name: "Close report" }).click();
+  await page.getByRole("button", { name: "Generate report" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Current founder analysis");
+  release!();
+  await expect(report).not.toContainText("Stale founder analysis");
+  expect(calls).toBe(2);
+});
+
+async function askFundingQuestion(page: Page, question: string) {
+  await page.getByLabel("Ask about your investors").fill(question);
+  await page.getByRole("button", { name: "Send question" }).click();
+  await expect(page.getByRole("button", { name: "Send question" })).toBeDisabled();
+  await expect(page.getByLabel("Ask about your investors")).toBeEnabled();
+}
+
+test("saved reports reopen without generation and update explicitly only after new research findings", async ({ page }) => {
+  await openGraph(page);
+  let revision = 0;
+  const histories: Array<Array<{ role: string; content: string }>> = [];
+  await page.route("**/api/runs/v2-run/evidence", route => route.fulfill({ json: { revision, observation_count: revision, updated_at: null, truncated: false } }));
+  await page.route("**/api/runs/v2-run/report", route => {
+    histories.push(route.request().postDataJSON().history);
+    return route.fulfill({ json: { message: `Saved founder report ${revision} [s1].`, citations: [source], citation_ids: ["s1"],
+      candidate_ids: ["kibo"], model_used: true, tool_steps: [], evidence_revision: revision } });
+  });
+  await page.route("**/api/runs/v2-run/chat/stream", route => {
+    const research = route.request().postDataJSON().message === "Check new portfolio evidence";
+    if (research) revision = 2;
+    return route.fulfill({ contentType: "text/event-stream", body: `event: answer\ndata: ${JSON.stringify({
+      message: research ? "New portfolio evidence retrieved [s1]." : "Explanation using the saved shortlist [s1].", citations: [source], citation_ids: ["s1"],
+      candidate_ids: ["kibo"], model_used: true, tool_steps: [], evidence_revision: revision })}\n\n` });
+  });
+  await page.getByRole("button", { name: "Generate report" }).click();
+  const report = page.getByRole("dialog", { name: /Round report/ });
+  await expect(report.locator(".run-report-narrative")).toContainText("Saved founder report 0");
+  await report.getByRole("button", { name: "Close report" }).click();
+  await askFundingQuestion(page, "Explain the current shortlist");
+  await page.getByRole("button", { name: "View report" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Saved founder report 0");
+  await expect(report.getByRole("button", { name: "Update report" })).toHaveCount(0);
+  await expect(report.locator(".run-report-q")).toHaveCount(0);
+  expect(histories).toHaveLength(1);
+  await report.getByRole("button", { name: "Close report" }).click();
+  await askFundingQuestion(page, "Check new portfolio evidence");
+  await expect(page.locator(".workspace-report-update")).toHaveText("New findings available");
+  await page.getByRole("button", { name: "View report" }).click();
+  await expect(report.locator(".run-report-update")).toContainText("New findings available");
+  await expect(report.locator(".run-report-narrative")).toContainText("Saved founder report 0");
+  expect(histories).toHaveLength(1);
+  await report.getByRole("button", { name: "Update report" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Saved founder report 2");
+  await expect(report.getByRole("button", { name: "Update report" })).toHaveCount(0);
+  await expect(report.locator(".run-report-q")).toHaveText(["Explain the current shortlist", "Check new portfolio evidence"]);
+  expect(histories).toHaveLength(2);
+  expect(histories[1].map(turn => turn.content)).toContain("New portfolio evidence retrieved [s1].");
+  await expect(report.locator(".rc-cite a")).toHaveAttribute("href", source.url);
+  const download = page.waitForEvent("download");
+  await report.getByRole("button", { name: "Download .md" }).click();
+  const markdown = await fs.readFile((await (await download).path())!, "utf8");
+  expect(markdown).toContain(`Saved founder report 2 [1](<${source.url}>).`);
+  expect(markdown).toContain("Check new portfolio evidence");
+  await report.getByRole("button", { name: "Close report" }).click();
+  await page.getByRole("button", { name: "View report" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Saved founder report 2");
+  expect(histories).toHaveLength(2);
+});
+
+test("failed or cancelled report updates keep the last successful report and snapshot", async ({ page }) => {
+  await openGraph(page);
+  let revision = 0;
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/runs/v2-run/evidence", route => route.fulfill({ json: { revision, observation_count: revision, updated_at: null, truncated: false } }));
+  await page.route("**/api/runs/v2-run/report", async route => {
+    const call = ++calls;
+    if (call === 2) return route.fulfill({ status: 503, json: { error: { code: "report_unavailable", message: "Model unavailable" } } });
+    if (call === 3) await pending;
+    await route.fulfill({ json: { message: call === 1 ? "Original successful report [s1]." : "Cancelled report update [s1].",
+      citations: [source], citation_ids: ["s1"], candidate_ids: [], model_used: true, tool_steps: [], evidence_revision: call === 1 ? 0 : 1 } })
+      .catch(() => { /* cancelled requests may no longer accept a response */ });
+  });
+  await page.getByRole("button", { name: "Generate report" }).click();
+  const report = page.getByRole("dialog", { name: /Round report/ });
+  await expect(report.locator(".run-report-narrative")).toContainText("Original successful report");
+  await report.getByRole("button", { name: "Close report" }).click();
+  revision = 1;
+  await page.getByRole("button", { name: "View report" }).click();
+  await report.getByRole("button", { name: "Update report" }).click();
+  await expect(report.getByRole("alert")).toContainText("Your previous report is still available");
+  await expect(report.locator(".run-report-narrative")).toContainText("Original successful report");
+  const download = page.waitForEvent("download");
+  await report.getByRole("button", { name: "Download .md" }).click();
+  expect(await fs.readFile((await (await download).path())!, "utf8")).toContain("Original successful report");
+  await report.getByRole("button", { name: "Retry update" }).click();
+  await expect.poll(() => calls).toBe(3);
+  await expect(report.locator(".run-report-narrative")).toContainText("Original successful report");
+  await report.getByRole("button", { name: "Close report" }).click();
+  await page.getByRole("button", { name: "View report" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Original successful report");
+  release!();
+  await expect(report).not.toContainText("Cancelled report update");
+  expect(calls).toBe(3);
+});
+
+test("a report keeps its exact included revision when newer evidence arrives during generation", async ({ page }) => {
+  await openGraph(page);
+  let revision = 0;
+  let calls = 0;
+  await page.route("**/api/runs/v2-run/evidence", route => route.fulfill({ json: { revision, observation_count: revision, updated_at: null, truncated: false } }));
+  await page.route("**/api/runs/v2-run/report", route => {
+    const includedRevision = revision;
+    calls += 1;
+    revision = 1;
+    return route.fulfill({ json: { message: `Report includes revision ${includedRevision}.`, citations: [], citation_ids: [], candidate_ids: [],
+      model_used: true, tool_steps: [], evidence_revision: includedRevision } });
+  });
+  await page.getByRole("button", { name: "Generate report" }).click();
+  const report = page.getByRole("dialog", { name: /Round report/ });
+  await expect(report.locator(".run-report-narrative")).toContainText("Report includes revision 0");
+  await expect(report.locator(".run-report-update")).toContainText("New findings available");
+  expect(calls).toBe(1);
+  await report.getByRole("button", { name: "Update report" }).click();
+  await expect(report.locator(".run-report-narrative")).toContainText("Report includes revision 1");
+  await expect(report.locator(".run-report-update")).toHaveCount(0);
+  expect(calls).toBe(2);
 });

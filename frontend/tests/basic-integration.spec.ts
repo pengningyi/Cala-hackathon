@@ -360,9 +360,9 @@ test("agent chat shows the Cala lookups it ran and surfaces streamed errors", as
   await page.getByRole("button", { name: "Send question", exact: true }).click();
   const answer = page.locator(".rc-chat-message-assistant").last();
   await expect(answer).toContainText("Acme Capital co-invested");
-  await expect(answer.locator(".rc-chat-answer-meta")).toContainText("Live model + Cala lookups");
+  await expect(answer.locator(".rc-chat-answer-meta")).toContainText("Live model + research activity");
   const lookups = answer.locator(".rc-chat-lookups");
-  await expect(lookups).toContainText("2 Cala lookups during this answer");
+  await expect(lookups).toContainText("2 activities during this answer");
   await lookups.locator("summary").click();
   await expect(lookups.locator(".rc-chat-step-done")).toContainText("3 results");
   await expect(lookups.locator(".rc-chat-step-failed")).toContainText("budget");
@@ -387,6 +387,29 @@ test("chat falls back to the single-response endpoint when the backend has no st
   await page.getByRole("button", { name: "Send question", exact: true }).click();
   await expect(page.locator(".rc-chat-message-assistant").last()).toContainText("Answer from the older chat endpoint.");
   await expect(page.locator(".rc-chat-message-failed")).toHaveCount(0);
+});
+
+test("chat attributes delegated research activities without counting them as Cala lookups", async ({ page }) => {
+  await mockApi(page);
+  const steps = [
+    { id: "delegate", tool: "request_research", label: "Checking missing portfolio evidence", arguments: {}, status: "done", count: 1, error: null, agent: "chat" },
+    { id: "research", tool: "entity_retrieval", label: "Reading the investor profile", arguments: {}, status: "done", count: 1, error: null, agent: "research" },
+  ];
+  await page.route("**/api/runs/basic-run/chat/stream", route => route.fulfill({ contentType: "text/event-stream", body: sse({
+    message: "The retrieved profile supports this introduction route.", citations: [source], citation_ids: ["s1"], candidate_ids: [], model_used: true, tool_steps: steps }, steps) }));
+  await page.goto("/");
+  await confirmCompanies(page);
+  await completeRound(page);
+  await page.getByLabel("I have reviewed my round details.", { exact: true }).check();
+  await page.getByRole("button", { name: "Find my co-investors", exact: true }).click();
+  await page.getByLabel("Ask about your investors", { exact: true }).fill("Can you check their portfolio?");
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  const activity = page.locator(".rc-chat-message-assistant").last().locator(".rc-chat-lookups");
+  await expect(activity).toContainText("2 activities during this answer");
+  await activity.locator("summary").click();
+  await expect(activity).toContainText("Round assistant: Checking missing portfolio evidence");
+  await expect(activity).toContainText("Research assistant: Reading the investor profile");
+  await expect(activity).not.toContainText("request_research");
 });
 
 test("assistant answers render markdown with numbered inline citations", async ({ page }) => {

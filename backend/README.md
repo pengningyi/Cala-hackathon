@@ -29,14 +29,30 @@ It runs ephemeral, read-only structured model requests with external tools
 disabled. It receives the founder profile and retrieved Cala facts; Cala
 credentials are excluded from its subprocess environment. A slow/unavailable model
 leaves semantic fit unknown and uses deterministic introduction templates.
-Live chat uses the same provider with a separate generation request for each
-question, including recent conversation history, the selected investor and a
-bounded snapshot of the saved result. Replies can explain scores, relationships,
-allocation and next steps or help draft an introduction. They do not change the
-run or perform new discovery. Returned citations resolve only to saved sources.
-Chat failures produce an explicit retryable error rather than a canned answer.
-`CHAT_TIMEOUT_SECONDS=60` and `CHAT_MAX_CONCURRENCY=2` control chat independently
-of the discovery assessment budget.
+With an OpenAI-compatible model API, configured Cala and `MULTI_AGENTS_ENABLED=true`
+(the default), chat delegates missing-evidence questions to a separate Research
+Agent. Research chooses typed read-only Cala tools and returns a validated evidence
+handoff; chat answers from the immutable saved run plus those observations. Both
+agents share one chat deadline, raw Cala-call budget and model-call allowance.
+The Assessment Agent independently labels portfolio fit during the discovery run;
+deterministic code retains ranking and allocation. `CHAT_TIMEOUT_SECONDS=90` and
+`CHAT_MAX_CONCURRENCY=2` control chat independently of discovery assessment.
+
+`POST /api/runs/{id}/report` invokes a separate Report Agent with a report-specific
+prompt, saved-result evidence, server-recorded chat research and conversation topics.
+Only actual sourced Cala observations from successful chats enter the separate per-run
+journal; generated assistant prose is topic context. `GET /api/runs/{id}/evidence` exposes
+its revision and coverage. Reports return their captured `evidence_revision`; the UI
+marks older reports with "New findings available" and updates only on request.
+The frontend includes its
+validated narrative/citations in the existing report and Markdown export. If the
+model is disabled or fails, the snapshot report remains available with an explicit
+notice. `REPORT_TIMEOUT_SECONDS=45` leaves headroom under the frontend proxy's
+60-second timeout. Reports do not perform research or publish externally.
+
+`MULTI_AGENTS_ENABLED=false` retains original direct-tool chat; Codex CLI continues
+to use snapshot chat because its external tools are disabled. See the exact role
+interfaces, controls and configuration in [multi-agent workflow](../docs/multi-agent-workflow.md).
 
 To use your own foundation model instead:
 
@@ -47,7 +63,16 @@ MODEL_API_KEY=your-private-key
 MODEL_NAME=your-model
 ```
 
-The provider must support `/chat/completions` and JSON-schema structured output.
+The provider must support `/chat/completions` and JSON-schema or JSON-object output.
+For DeepSeek `deepseek-flash`, set `MODEL_THINKING_MODE=disabled`. This adds the
+top-level `thinking: {"type": "disabled"}` extension to every model request,
+including tool turns and JSON fallbacks. DeepSeek enables thinking by default;
+that mode rejects forced tool choices and requires reasoning transcript replay,
+which this harness does not preserve. Leave the setting absent for other providers
+so their requests retain the default payload. `enabled` is accepted for providers
+whose thinking mode supports the existing transcript contract. See DeepSeek's
+[thinking guide](https://api-docs.deepseek.com/guides/thinking_mode/) and
+[Chat Completions reference](https://api-docs.deepseek.com/api/create-chat-completion/).
 Native APIs using another protocol need a `SemanticProvider` adapter. No specific
 model is imposed. `MODEL_PROVIDER=disabled` keeps semantic assessments unknown
 and makes live chat unavailable until a provider is enabled.

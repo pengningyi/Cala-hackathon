@@ -22,7 +22,8 @@ TOOL_URL = "https://news.example.test/acme-seed"
 
 
 def settings(**overrides):
-    return Settings(_env_file=None, **{"model_provider": "disabled", "cache_ttl_seconds": 0, **overrides})
+    return Settings(_env_file=None, **{"model_provider": "disabled", "cache_ttl_seconds": 0,
+                                     "multi_agents_enabled": False, **overrides})
 
 
 class FakeProvider:

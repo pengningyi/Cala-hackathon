@@ -17,28 +17,30 @@ from .cala_rest import CalaKnowledgeResolver
 from .config import Settings
 from .chat_agent import ChatAgent
 from .chat_model import ChatModelError, LiveResultChat
+from .assessment_agent import AssessmentAgent
+from .report_agent import ReportAgent, ReportRequest
 from .models import (
     ChatRequest, ChatResponse, CompanyConfirmation, CompanyMatchRequest, CompanyMatches,
-    ConfirmCompanyMatches, Resolution, ResolveRequest, RunResult, RunStatus, StartRunRequest,
+    ConfirmCompanyMatches, Resolution, ResolveRequest, ResearchEvidenceStatus, RunResult, RunStatus, StartRunRequest,
 )
 from .pipeline import Workflow, WorkflowError
 from .runtime import BudgetExceeded
 from .semantic import CodexSemantic, OpenAICompatibleSemantic
 
 
-async def _connected_chat_reply(service, result, payload, http_request):
+async def _connected_chat_reply(service, result, payload, http_request, operation="chat", **reply_options):
     """Stop model work promptly when its browser request disappears."""
     async def disconnected():
         while not await http_request.is_disconnected():
             await asyncio.sleep(.1)
 
-    generation = asyncio.create_task(service.reply(result, payload))
+    generation = asyncio.create_task(service.reply(result, payload, **reply_options))
     connection = asyncio.create_task(disconnected())
     try:
         done, _ = await asyncio.wait((generation, connection), return_when=asyncio.FIRST_COMPLETED)
         if generation in done:
             return generation.result()
-        raise WorkflowError("chat_client_disconnected", "Chat request was cancelled.", 499)
+        raise WorkflowError(f"{operation}_client_disconnected", "Generation request was cancelled.", 499)
     finally:
         for task in (generation, connection):
             if not task.done():
@@ -46,7 +48,7 @@ async def _connected_chat_reply(service, result, payload, http_request):
         await asyncio.gather(generation, connection, return_exceptions=True)
 
 
-def create_app(settings: Settings | None = None, provider=None, semantic=None, chat=None, identity=None):
+def create_app(settings: Settings | None = None, provider=None, semantic=None, chat=None, identity=None, report=None):
     settings = settings or Settings()
     if identity is None and provider is None and settings.cala_api_key:
         # Onboarding "Confirm matches" uses Cala REST /v1/knowledge/query; the run stays on MCP.
@@ -62,8 +64,10 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
         semantic = CodexSemantic(executable=settings.codex_executable,
                                  timeout_seconds=settings.model_timeout_seconds, enabled=True)
     elif semantic is None and settings.model_provider == "openai_compatible":
-        semantic = OpenAICompatibleSemantic(base_url=settings.model_base_url, api_key=settings.model_api_key,
-                                            model=settings.model_name, timeout_seconds=settings.model_timeout_seconds)
+        assessment_role = AssessmentAgent if settings.multi_agents_enabled else OpenAICompatibleSemantic
+        semantic = assessment_role(base_url=settings.model_base_url, api_key=settings.model_api_key,
+                                   model=settings.model_name, timeout_seconds=settings.model_timeout_seconds,
+                                   thinking_mode=settings.model_thinking_mode)
     workflow = Workflow(settings, provider, semantic, identity)
     if chat is not None:
         chat_service = chat
@@ -73,6 +77,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
         chat_service = ChatAgent(settings, workflow)
     else:
         chat_service = LiveResultChat(settings)
+    report_service = report if report is not None else ReportAgent(settings)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -83,6 +88,7 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
                   description="Resolve a Cala lead, confirm the founder profile, and start a bounded co-investor search.")
     app.state.workflow = workflow
     app.state.chat = chat_service
+    app.state.report = report_service
     app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin],
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Last-Event-ID"])
 
@@ -118,7 +124,8 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
     @app.get("/api/health")
     async def health():
         return {"status": "healthy", "cala_configured": bool(getattr(provider, "configured", False)),
-                "model_provider": settings.model_provider, "storage": "in_memory", "api_version": "0.1.0"}
+                "model_provider": settings.model_provider, "storage": "in_memory", "api_version": "0.1.0",
+                "multi_agents_enabled": settings.multi_agents_enabled}
 
     @app.get("/api/integrations/cala/tools")
     async def cala_tools():
@@ -195,7 +202,10 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
             card.investor.id for card in run.result.candidates
         }:
             raise WorkflowError("invalid_chat_selection", "Select an investor from this run's shortlist")
-        return await _connected_chat_reply(chat_service, run.result, request, http_request)
+        options = {"research": run.research} if isinstance(chat_service, ChatAgent) else {}
+        answer = await _connected_chat_reply(chat_service, run.result, request, http_request, **options)
+        answer.evidence_revision = run.research.revision
+        return answer
 
     @app.post("/api/runs/{run_id}/chat/stream")
     async def result_chat_stream(run_id: str, request: ChatRequest, http_request: Request):
@@ -207,9 +217,26 @@ def create_app(settings: Settings | None = None, provider=None, semantic=None, c
             card.investor.id for card in run.result.candidates
         }:
             raise WorkflowError("invalid_chat_selection", "Select an investor from this run's shortlist")
-        return StreamingResponse(_chat_events(chat_service, run.result, request, http_request),
+        return StreamingResponse(_chat_events(chat_service, run.result, request, http_request, run.research),
                                  media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/runs/{run_id}/evidence", response_model=ResearchEvidenceStatus)
+    async def research_evidence_status(run_id: str):
+        """Read-only freshness check; no model generation or client-submitted evidence."""
+        return workflow.get(run_id).research.status()
+
+    @app.post("/api/runs/{run_id}/report", response_model=ChatResponse)
+    async def result_report(run_id: str, request: ReportRequest, http_request: Request):
+        """Report over one frozen saved-result and server-recorded research snapshot."""
+        run = workflow.get(run_id)
+        if run.result is None:
+            raise WorkflowError("run_not_ready", "Wait for the run result before generating its report", 409)
+        snapshot = run.research.snapshot()
+        options = {"research": snapshot} if isinstance(report_service, ReportAgent) else {}
+        answer = await _connected_chat_reply(report_service, run.result, request, http_request, "report", **options)
+        answer.evidence_revision = snapshot.revision
+        return answer
 
     return app
 
@@ -218,14 +245,14 @@ def _frame(event: str, data) -> str:
     return f"event: {event}\ndata: {json.dumps(jsonable_encoder(data), ensure_ascii=False)}\n\n"
 
 
-async def _chat_events(service, result, payload, http_request):
+async def _chat_events(service, result, payload, http_request, research=None):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def on_step(step):
         await queue.put(step)
 
     if isinstance(service, ChatAgent):
-        generation = asyncio.create_task(service.reply(result, payload, on_step))
+        generation = asyncio.create_task(service.reply(result, payload, on_step, research=research))
     else:
         generation = asyncio.create_task(service.reply(result, payload))
     try:
@@ -240,7 +267,10 @@ async def _chat_events(service, result, payload, http_request):
                 while not queue.empty():
                     yield _frame("step", queue.get_nowait())
                 try:
-                    yield _frame("answer", generation.result())
+                    answer = generation.result()
+                    if research is not None:
+                        answer.evidence_revision = research.revision
+                    yield _frame("answer", answer)
                 except (ChatModelError, WorkflowError) as exc:
                     yield _frame("error", {"code": exc.code, "message": exc.message, "status": exc.status})
                 except Exception:

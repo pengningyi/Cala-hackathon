@@ -103,8 +103,13 @@ explore and question the result.
   cannot add or remove investors, and any judgement it makes must point to evidence.
   If a check fails, or the model is slow or unavailable, the app falls back to plain
   rules and templates instead of showing an unchecked answer.
-- **Grounded chat.** The assistant answers only from the saved result of the current
-  search. Its citations must link to real sources, and it cannot invent new investors.
+- **Grounded specialist agents.** With a model API, the chat agent delegates missing
+  evidence to a separate research agent using Cala's read-only tools. Assessment and
+  report-writing roles have their own instructions and validated outputs. Numeric
+  scoring stays in code. [Multi-agent design](docs/multi-agent-workflow.md).
+- **Reports that follow new evidence.** Sourced Cala observations retrieved during chat
+  are saved separately from assistant prose. New findings mark an existing report ready
+  for an explicit update, preserving the prior report and its sources until regeneration succeeds.
 - **Bounded, observable autonomy.** The agent works within a 120-second, 72-request
   budget and runs up to six lookups in parallel. Every tool call, cached answer and
   retry streams live to the screen. If the agent runs out of budget, it returns what it

@@ -957,6 +957,14 @@ h1, h2, h3, h4, .brand, .candidate-identity h3, .fit-score strong,
 .run-report-investors small, .run-report-exchanges small { font-size: 10px; color: var(--muted); }
 .run-report-q { font-weight: 600; }
 .run-report-muted { font-size: 12px; color: var(--muted); }
+.run-report-progress { display: flex; align-items: flex-start; gap: 8px; line-height: 1.6; }
+.run-report-progress svg { flex-shrink: 0; margin-top: 3px; }
+.run-report-error { display: grid; gap: 10px; justify-items: start; font-size: 12px; line-height: 1.6; }
+.run-report-update { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 24px; background: #f7f4fa; font-size: 12px; line-height: 1.6; }
+.workspace-report-update { color: var(--muted); font-size: 11px; }
+.run-report-sources { margin: 12px 0 0; padding-left: 20px; font-size: 11px; line-height: 1.6; }
+.run-report-sources a { display: inline-flex; align-items: center; gap: 5px; overflow-wrap: anywhere; }
+.rc-chat-step-role { font-weight: 600; }
 .run-report-caveats-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
 .run-report-caveats-toggle > span { font-size: 10px; font-weight: 500; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; }
 .run-report-chevron { color: var(--muted); transition: transform .18s; }
